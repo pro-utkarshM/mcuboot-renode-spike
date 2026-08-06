@@ -164,12 +164,19 @@ class RenodeSession:
                     stderr = stderr.decode("utf-8", errors="replace")
                 last = stdout + stderr
                 rc = 124
+            semantic_error = bool(re.search(r"(?m)^Error(?:\s+response)?:", last))
             with self.mcumgr_log.open("a", encoding="utf-8") as stream:
                 stream.write(f"$ {' '.join(command)}\n")
                 stream.write(last)
-                stream.write(f"\nreturncode={rc} attempt={attempt}\n")
-            if rc == 0:
+                stream.write(
+                    f"\nreturncode={rc} semantic_error={semantic_error} "
+                    f"attempt={attempt}\n")
+            if rc == 0 and not semantic_error:
                 return last
+            if semantic_error:
+                raise ControllerError(
+                    "MCUmgr returned an application error despite exit status 0: "
+                    f"{' '.join(arguments)}\n{last}")
             if self.process is None or self.process.poll() is not None:
                 raise ControllerError("Renode exited while running MCUmgr")
             time.sleep(0.5)
@@ -296,13 +303,14 @@ def baseline_proof(output_dir: Path) -> None:
     confirm_dir = output_dir / "confirm"
     with RenodeSession(baseline, confirm_dir, trace=True) as session:
         session.wait_marker("FIRMWARE_VERSION=1.0.0")
-        stage_update(session, v2)
+        image_hash = stage_update(session, v2)
         reset_and_wait(session, "2.0.0")
         wait_for(
             lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
                      or "DURABLE_STATE=already-present" in read_uart()),
             "durable v2 state before external confirmation", 45.0)
-        session.run_mcumgr("image", "confirm", attempts=5, timeout=30.0)
+        session.run_mcumgr("image", "confirm", image_hash,
+                           attempts=5, timeout=30.0)
         for _ in range(3):
             reset_and_wait(session, "2.0.0")
         save_final_list(session, confirm_dir)
