@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -71,6 +72,7 @@ class RenodeSession:
         self.trace = trace
         self.process: subprocess.Popen[bytes] | None = None
         self._renode_stream = None
+        self._renode_home: Path | None = None
         self.mcumgr_log = output_dir / "mcumgr-commands.log"
 
     def start(self) -> "RenodeSession":
@@ -87,7 +89,7 @@ class RenodeSession:
         shutil.copyfile(self.source_flash, FLASH)
 
         args = [
-            "renode", "--disable-gui", "--hide-log",
+            "renode", "--disable-gui", "--hide-log", "--port", "0",
             str(ROOT / "renode" / "boot.resc"),
             "-e", "uart0 CreateFileBackend @/tmp/uart.log true",
         ]
@@ -97,6 +99,17 @@ class RenodeSession:
         args += ["-e", "start"]
         env = os.environ.copy()
         env["FAULT_AFTER_OPERATION"] = str(self.fault_after)
+        # Renode 1.16.1 can leave its per-user config lock unusable for an
+        # immediately following process.  Every proof flow intentionally
+        # starts several independent emulator processes, so give each one a
+        # private config home rather than sharing ~/.config/renode.
+        # Do not use Renode's own /tmp/renode-* namespace: its startup
+        # scavenger removes stale entries there, including a freshly created
+        # config home.
+        self._renode_home = Path(tempfile.mkdtemp(prefix="ota-emulator-home-"))
+        env["HOME"] = str(self._renode_home)
+        env["XDG_CONFIG_HOME"] = str(self._renode_home / ".config")
+        (self._renode_home / ".config" / "renode").mkdir(parents=True)
         self._renode_stream = RENODE_LOG.open("wb")
         self.process = subprocess.Popen(
             args, stdin=subprocess.DEVNULL, stdout=self._renode_stream,
@@ -109,7 +122,13 @@ class RenodeSession:
                     f"Renode exited during startup; see {RENODE_LOG}")
             return PTY.exists() and UART.exists()
 
-        wait_for(ready, "Renode UART PTY", 30.0)
+        try:
+            wait_for(ready, "Renode UART PTY", 30.0)
+        except BaseException:
+            # __exit__ is not entered when __enter__ fails.  Stop explicitly
+            # so the launch log is still copied to the mounted artifacts.
+            self.stop()
+            raise
         return self
 
     def uart_offset(self) -> int:
@@ -181,6 +200,9 @@ class RenodeSession:
         for source, name in copies.items():
             if source.exists():
                 shutil.copyfile(source, self.output_dir / name)
+        if self._renode_home is not None:
+            shutil.rmtree(self._renode_home, ignore_errors=True)
+            self._renode_home = None
 
     def __enter__(self) -> "RenodeSession":
         return self.start()
