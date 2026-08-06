@@ -138,7 +138,6 @@ RUN rm -rf /opt/venv \
     && /opt/venv/bin/pip check
 
 COPY --from=mcumgr-builder /usr/local/bin/mcumgr /usr/local/bin/mcumgr
-COPY --chown=10001:10001 . /workspace/app
 
 # `spike` is the only runtime user.  Initial firmware builds happen as this
 # user too, which catches permissions that would fail in the restricted proof
@@ -151,6 +150,13 @@ RUN groupadd --gid 10001 spike \
     && mkdir -p /workspace/app/artifacts /workspace/app/build /workspace/app/fixtures \
     && chown -R spike:spike /workspace/app
 
+# Keep the costly firmware layer dependent only on its actual inputs. Changes
+# to the Python controller, Renode scripts, or tests are copied after it and do
+# not force five otherwise identical sysbuild recompilations.
+COPY --chown=10001:10001 firmware /workspace/app/firmware
+COPY --chown=10001:10001 keys /workspace/app/keys
+COPY --chown=10001:10001 scripts/build_firmware.sh /workspace/app/scripts/build_firmware.sh
+
 WORKDIR /workspace/app
 USER spike
 RUN scripts/build_firmware.sh
@@ -158,6 +164,8 @@ RUN scripts/build_firmware.sh
 USER root
 RUN renode --version \
     && mcumgr --help >/dev/null
+
+COPY --chown=10001:10001 . /workspace/app
 USER spike
 
 ENTRYPOINT ["/workspace/app/scripts/container-entrypoint.sh"]
