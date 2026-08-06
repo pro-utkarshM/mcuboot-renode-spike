@@ -274,6 +274,25 @@ def version_hash(image_list: str, version: str) -> str:
     raise ControllerError(f"MCUmgr image list has no hash for version {version}")
 
 
+def active_image(image_list: str) -> str:
+    blocks = re.split(r"(?=^\s*image=\d+\s+slot=\d+\s*$)", image_list,
+                      flags=re.MULTILINE)
+    for block in blocks:
+        if not re.search(r"^\s*image=0\s+slot=0\s*$", block,
+                         flags=re.MULTILINE):
+            continue
+        if not re.search(r"^\s*flags:\s*.*\bactive\b", block,
+                         flags=re.MULTILINE | re.IGNORECASE):
+            continue
+        version = re.search(r"^\s*version:\s*([^\s]+)", block,
+                            flags=re.MULTILINE)
+        if version is not None and version.group(1).startswith("1.0.0"):
+            return "v1"
+        if version is not None and version.group(1).startswith("2.0.0"):
+            return "v2"
+    raise ControllerError("MCUmgr image list has no recognized active primary image")
+
+
 def stage_update(session: RenodeSession, image: Path) -> str:
     require_file(image)
     session.run_mcumgr("image", "upload", str(image), attempts=8, timeout=180.0)
@@ -331,18 +350,80 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
                        trace=True) as session:
         session.wait_marker("FIRMWARE_VERSION=1.0.0")
         stage_update(session, image)
-        reset_and_wait(session, "2.0.0")
-        if negative_marker is None:
-            wait_for(
-                lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
-                         or "DURABLE_STATE=already-present" in read_uart()),
-                "durable v2 state marker", 45.0)
-            session.wait_marker("IMAGE_CONFIRMATION=complete", timeout=45.0)
+        reset_offset = session.uart_offset()
+
+        if fault_after == 0:
+            reset_and_wait(session, "2.0.0")
+            final_image = "v2"
+            if negative_marker is None:
+                wait_for(
+                    lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
+                             or "DURABLE_STATE=already-present" in read_uart()),
+                    "durable v2 state marker", 45.0)
+                session.wait_marker("IMAGE_CONFIRMATION=complete", timeout=45.0)
+            else:
+                session.wait_marker(negative_marker, timeout=45.0)
         else:
-            session.wait_marker(negative_marker, timeout=45.0)
+            def fault_seen() -> bool:
+                try:
+                    return f"fault=power-loss after_op={fault_after}" in \
+                        TRACE.read_text(encoding="utf-8", errors="replace")
+                except FileNotFoundError:
+                    return False
+
+            fault_before_reset = fault_seen()
+            session.run_mcumgr("reset", attempts=3, timeout=15.0)
+            wait_for(fault_seen, f"configured power loss after operation {fault_after}",
+                     OTA_BOOT_TIMEOUT)
+
+            # Do not query the old application in the small interval between
+            # an acknowledged reset command and the reset taking effect. Cuts
+            # that fire during the v2 application have one pre-cut v2 marker
+            # and require a second, post-cut recovery marker. Upload/swap cuts
+            # and faults already consumed before this reset need only one.
+            try:
+                first_operation_in_range(TRACE, STORAGE_OFFSET, FLASH_SIZE)
+                application_phase_cut = not fault_before_reset
+            except ControllerError:
+                application_phase_cut = False
+            required_boots = 2 if application_phase_cut else 1
+
+            def recovery_boot_seen() -> bool:
+                markers = re.findall(
+                    r"^FIRMWARE_VERSION=(?:1\.0\.0|2\.0\.0)\r?$",
+                    read_uart(reset_offset), flags=re.MULTILINE)
+                return len(markers) >= required_boots
+
+            wait_for(recovery_boot_seen, "post-fault application boot",
+                     OTA_BOOT_TIMEOUT)
+            if negative_marker is not None:
+                session.wait_marker(negative_marker, reset_offset,
+                                    OTA_BOOT_TIMEOUT)
+
+            # A cut during upload or swap resumes and can converge to v2. A
+            # cut after the test image starts but before confirmation correctly
+            # reverts to v1. Query the recovered firmware instead of assuming
+            # one outcome; the verifier accepts only these two stable states.
+            recovered_list = session.image_list()
+            final_image = active_image(recovered_list)
+            if final_image == "v2":
+                if negative_marker is None:
+                    wait_for(
+                        lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
+                                 or "DURABLE_STATE=already-present" in read_uart()),
+                        "durable v2 state marker", 45.0)
+                    session.wait_marker("IMAGE_CONFIRMATION=complete", timeout=45.0)
+            elif negative_marker is not None:
+                raise ControllerError(
+                    "negative firmware reverted before its seeded bug executed")
+            else:
+                session.wait_marker("PERSISTENT_SETTING=loaded:generation=1",
+                                    reset_offset, OTA_BOOT_TIMEOUT)
+
+        final_version = "2.0.0" if final_image == "v2" else "1.0.0"
         # Bounded recovery boots prove that the selected image remains stable.
         for _ in range(2):
-            reset_and_wait(session, "2.0.0")
+            reset_and_wait(session, final_version)
         save_final_list(session, output_dir)
 
 

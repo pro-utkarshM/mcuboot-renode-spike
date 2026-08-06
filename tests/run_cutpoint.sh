@@ -24,8 +24,8 @@ readonly address="${address_field#address=}"
 readonly length="${length_field#length=}"
 readonly final_version="$(grep -a '^FIRMWARE_VERSION=' "$run_dir/uart.log" | tail -n 1 | cut -d= -f2)"
 case "$final_version" in
-    1.0.0) final_image=v1 ;;
-    2.0.0) final_image=v2 ;;
+    1.0.0) final_image=v1; durable_state=any ;;
+    2.0.0) final_image=v2; durable_state=present ;;
     *) echo "invalid final firmware marker: $final_version" >&2; exit 2 ;;
 esac
 readonly boots="$(grep -a -c '^FIRMWARE_VERSION=' "$run_dir/uart.log")"
@@ -38,7 +38,7 @@ python3 "$app_root/tests/verify_state.py" verify-run \
     --v1-image "$fixtures/sealed-v1-signed.bin" \
     --v2-image "$fixtures/v2-auto-confirm-signed.bin" \
     --expected-final "$final_image" --fault-operation "$cut_point" \
-    --durable-state present --output "$run_dir/verification.json"
+    --durable-state "$durable_state" --output "$run_dir/verification.json"
 
 test -s "$run_dir/fault-operation.txt"
 test "$(stat -c %s "$run_dir/fault-committed-flash.bin")" -eq 1048576
