@@ -1,0 +1,17 @@
+services:
+  spike:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcuboot-renode-spike:latest
+    working_dir: /workspace/app
+    user: "10001:10001"
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # This is intentionally an in-image shell.  It keeps the compose path
+    # equivalent to the sealed proof path and does not mount host devices,
+    # networking, the Docker socket, or source directories.
+    command: ["bash"]

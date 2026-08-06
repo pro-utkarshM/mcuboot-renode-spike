@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+
+menu "OTA spike v2 behavior"
+
+choice SPIKE_V2_CONFIRM_MODE
+	prompt "v2 image confirmation behavior"
+	default SPIKE_V2_UNCONFIRMED
+	help
+	  The default intentionally leaves v2 unconfirmed to exercise MCUboot
+	  revert.  The automatic mode confirms only after its v2 durable state has
+	  been synchronously committed.  The negative mode is deliberately wrong.
+
+config SPIKE_V2_UNCONFIRMED
+	bool "Do not confirm the v2 test image"
+
+config SPIKE_V2_AUTO_CONFIRM_AFTER_DURABLE
+	bool "Confirm v2 only after durable state"
+
+config SPIKE_V2_NEGATIVE_PREMATURE_CONFIRM
+	bool "NEGATIVE: confirm before durable state"
+
+config SPIKE_V2_NEGATIVE_ERASE_AFTER_CONFIRM
+	bool "NEGATIVE: erase durable state after confirmation"
+
+endchoice
+
+endmenu
+
+source "Kconfig.zephyr"

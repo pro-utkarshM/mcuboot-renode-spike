@@ -1,0 +1,6 @@
+# Start a fault-traced run after loading boot.resc. FAULT_AFTER_OPERATION=0
+# records a clean trace; a positive value requests a one-shot power cut after
+# that completed guest flash operation.
+
+sysbus.flash BeginTraceFromEnvironment @/tmp/flash-operations.log
+start

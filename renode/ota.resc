@@ -1,0 +1,3 @@
+# Baseline and OTA runs use the same real machine. This separate entry point is
+# retained to make responsibilities explicit and to support direct Renode use.
+include @/workspace/app/renode/boot.resc

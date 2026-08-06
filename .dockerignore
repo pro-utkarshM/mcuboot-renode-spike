@@ -1,0 +1,11 @@
+.git
+.agents
+.codex
+artifacts
+build
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.cache
+*.log
