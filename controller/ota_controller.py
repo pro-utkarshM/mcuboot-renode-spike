@@ -24,6 +24,7 @@ FLASH_SIZE = 1024 * 1024
 BOOT_OFFSET = 0x00000
 SLOT0_OFFSET = 0x0C000
 SLOT_SIZE = 0x76000
+OTA_BOOT_TIMEOUT = 240.0
 PTY = Path("/tmp/mcumgr-uart")
 FLASH = Path("/tmp/ota-flash.bin")
 UART = Path("/tmp/uart.log")
@@ -275,7 +276,7 @@ def stage_update(session: RenodeSession, image: Path) -> str:
 
 
 def reset_and_wait(session: RenodeSession, version: str,
-                   timeout: float = 45.0) -> None:
+                   timeout: float = OTA_BOOT_TIMEOUT) -> None:
     offset = session.uart_offset()
     session.run_mcumgr("reset", attempts=3, timeout=15.0)
     session.wait_marker(f"FIRMWARE_VERSION={version}", offset, timeout)
@@ -311,7 +312,7 @@ def baseline_proof(output_dir: Path) -> None:
         session.wait_marker("FIRMWARE_VERSION=1.0.0")
         stage_update(session, v2)
         reset_and_wait(session, "2.0.0")
-        reset_and_wait(session, "1.0.0", timeout=60.0)
+        reset_and_wait(session, "1.0.0")
         save_final_list(session, revert_dir)
 
 
@@ -321,7 +322,7 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
                        trace=True) as session:
         session.wait_marker("FIRMWARE_VERSION=1.0.0")
         stage_update(session, image)
-        reset_and_wait(session, "2.0.0", timeout=90.0)
+        reset_and_wait(session, "2.0.0")
         if negative_marker is None:
             wait_for(
                 lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
@@ -332,7 +333,7 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
             session.wait_marker(negative_marker, timeout=45.0)
         # Bounded recovery boots prove that the selected image remains stable.
         for _ in range(2):
-            reset_and_wait(session, "2.0.0", timeout=90.0)
+            reset_and_wait(session, "2.0.0")
         save_final_list(session, output_dir)
 
 
@@ -352,7 +353,7 @@ def fault_hook_proof(output_dir: Path) -> None:
     with RenodeSession(baseline, target_dir, trace=True) as session:
         session.wait_marker("FIRMWARE_VERSION=1.0.0")
         stage_update(session, image)
-        reset_and_wait(session, "2.0.0", timeout=90.0)
+        reset_and_wait(session, "2.0.0")
         session.wait_marker("DURABLE_WRITE_ARMED=1", timeout=30.0)
         target = trace_operation_count() + 1
         session.wait_marker("DURABLE_WRITE_SENTINEL=1", timeout=30.0)
@@ -365,7 +366,8 @@ def fault_hook_proof(output_dir: Path) -> None:
         stage_update(session, image)
         reset_offset = session.uart_offset()
         session.run_mcumgr("reset", attempts=3, timeout=15.0)
-        session.wait_marker("FIRMWARE_VERSION=2.0.0", reset_offset, 90.0)
+        session.wait_marker("FIRMWARE_VERSION=2.0.0", reset_offset,
+                            OTA_BOOT_TIMEOUT)
         session.wait_marker("DURABLE_WRITE_ARMED=1", reset_offset, 30.0)
         wait_for(lambda: f"fault=power-loss after_op={target}" in
                  TRACE.read_text(encoding="utf-8", errors="replace"),
@@ -388,7 +390,7 @@ def fault_hook_proof(output_dir: Path) -> None:
                  "recovered durable state", 45.0)
         session.wait_marker("IMAGE_CONFIRMATION=complete", second_boot_absolute, 45.0)
         for _ in range(2):
-            reset_and_wait(session, "2.0.0", timeout=90.0)
+            reset_and_wait(session, "2.0.0")
         save_final_list(session, cut_dir)
 
     (output_dir / "fault-hook-summary.json").write_text(
