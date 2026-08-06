@@ -241,7 +241,12 @@ namespace Antmicro.Renode.Peripherals.Memory
             {
                 stream.Position = offset;
                 stream.Write(source, sourceOffset, count);
-                stream.Flush(true);
+                // Closing the stream publishes the completed write to the
+                // backing file before CompletedOperation can inject a reset.
+                // Flush(true) would additionally force the host filesystem to
+                // stable media for every 4-byte NVMC write. That models host
+                // power loss, not simulated-MCU power loss, and makes swaps
+                // thousands of unnecessary fsync calls slower.
             }
         }
 
