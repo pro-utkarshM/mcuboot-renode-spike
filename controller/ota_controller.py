@@ -89,7 +89,7 @@ class RenodeSession:
         args = [
             "renode", "--disable-gui", "--hide-log",
             str(ROOT / "renode" / "boot.resc"),
-            "-e", "uart0 CreateFileBackend @/tmp/uart.log",
+            "-e", "uart0 CreateFileBackend @/tmp/uart.log true",
         ]
         if self.trace:
             args += ["-e", "sysbus.flash BeginTraceFromEnvironment "
