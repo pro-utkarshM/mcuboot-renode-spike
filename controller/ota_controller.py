@@ -24,6 +24,7 @@ FLASH_SIZE = 1024 * 1024
 BOOT_OFFSET = 0x00000
 SLOT0_OFFSET = 0x0C000
 SLOT_SIZE = 0x76000
+STORAGE_OFFSET = 0x0F8000
 OTA_BOOT_TIMEOUT = 240.0
 PTY = Path("/tmp/mcumgr-uart")
 FLASH = Path("/tmp/ota-flash.bin")
@@ -345,12 +346,20 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
         save_final_list(session, output_dir)
 
 
-def trace_operation_count() -> int:
-    try:
-        return sum(1 for line in TRACE.read_text(encoding="utf-8").splitlines()
-                   if line.startswith("op="))
-    except FileNotFoundError:
-        return 0
+def first_operation_in_range(trace_path: Path, start: int, end: int) -> int:
+    require_file(trace_path)
+    record = re.compile(
+        r"^op=(\d+) type=(program|erase) address=0x([0-9A-Fa-f]+) length=(\d+)$"
+    )
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        match = record.fullmatch(line)
+        if match is None:
+            continue
+        address = int(match.group(3), 16)
+        if start <= address < end:
+            return int(match.group(1))
+    raise ControllerError(
+        f"trace has no flash operation in range 0x{start:08x}-0x{end:08x}")
 
 
 def fault_hook_proof(output_dir: Path) -> None:
@@ -363,10 +372,17 @@ def fault_hook_proof(output_dir: Path) -> None:
         stage_update(session, image)
         reset_and_wait(session, "2.0.0")
         session.wait_marker("DURABLE_WRITE_ARMED=1", timeout=30.0)
-        target = trace_operation_count() + 1
         session.wait_marker("DURABLE_WRITE_SENTINEL=1", timeout=30.0)
         session.wait_marker("IMAGE_CONFIRMATION=complete", timeout=30.0)
         save_final_list(session, target_dir)
+
+    # Host polling cannot reliably sample between an emulated marker and the
+    # following write: simulated time may advance faster than wall time.  The
+    # baseline starts with populated v1 settings and neither upload nor MCUboot
+    # touches storage_partition, so its first traced operation is the first
+    # completed operation of v2's durable NVS update.
+    target = first_operation_in_range(
+        target_dir / "flash-operations.log", STORAGE_OFFSET, FLASH_SIZE)
 
     cut_dir = output_dir / "injected-cut"
     with RenodeSession(baseline, cut_dir, fault_after=target, trace=True) as session:
@@ -384,22 +400,27 @@ def fault_hook_proof(output_dir: Path) -> None:
         def reset_seen_after_arm() -> bool:
             tail = read_uart(reset_offset)
             arm = tail.find("DURABLE_WRITE_ARMED=1")
-            return arm >= 0 and tail.find("FIRMWARE_VERSION=2.0.0", arm) >= 0
+            return arm >= 0 and tail.find("FIRMWARE_VERSION=1.0.0", arm) >= 0
 
-        wait_for(reset_seen_after_arm, "post-cut v2 reset vector", 60.0)
+        wait_for(reset_seen_after_arm, "post-cut v1 reset vector", 60.0)
         tail = read_uart(reset_offset)
         arm = tail.find("DURABLE_WRITE_ARMED=1")
-        second_boot = tail.find("FIRMWARE_VERSION=2.0.0", arm)
+        second_boot = tail.find("FIRMWARE_VERSION=1.0.0", arm)
         if "DURABLE_WRITE_SENTINEL=1" in tail[arm:second_boot]:
             raise ControllerError("post-write sentinel executed before power-loss reset")
         second_boot_absolute = reset_offset + second_boot
-        wait_for(lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart(second_boot_absolute)
-                          or "DURABLE_STATE=already-present" in read_uart(second_boot_absolute)),
-                 "recovered durable state", 45.0)
-        session.wait_marker("IMAGE_CONFIRMATION=complete", second_boot_absolute, 45.0)
+        session.wait_marker("PERSISTENT_SETTING=loaded:generation=1",
+                            second_boot_absolute, 45.0)
+        # The cut occurs before v2 confirms itself. MCUboot's correct recovery
+        # is therefore the already-confirmed v1 image, not a second v2 test
+        # boot. Repeated resets prove that recovery converged.
         for _ in range(2):
-            reset_and_wait(session, "2.0.0")
-        save_final_list(session, cut_dir)
+            reset_and_wait(session, "1.0.0")
+        final_list = save_final_list(session, cut_dir)
+        if not re.search(
+                r"version:\s*1\.0\.0(?:\+\d+)?[\s\S]*?flags:\s*active confirmed",
+                final_list):
+            raise ControllerError("post-cut image state is not confirmed v1")
 
     (output_dir / "fault-hook-summary.json").write_text(
         json.dumps({
@@ -407,8 +428,9 @@ def fault_hook_proof(output_dir: Path) -> None:
             "selected_operation": target,
             "operation_completed_before_reset": True,
             "post_operation_sentinel_before_reset": False,
+            "post_fault_image": "v1",
             "volatile_ram_marker_after_reset": 1,
-            "persistent_flash_retained": True,
+            "persistent_v1_state_retained": True,
             "fault_was_one_shot": True,
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
