@@ -36,7 +36,7 @@ NVMC program bus transaction as an operation; it does not combine word writes
 to make the run count smaller. Runtime is therefore proportional to the actual
 signed image size and observed operation count.
 
-`tests/run_matrix.sh` runs four session-isolated cut points concurrently by
+`tests/run_matrix.sh` runs eight session-isolated cut points concurrently by
 default; set `MATRIX_JOBS` to a different positive count when the host has been
 validated for that load. Completed batches are checkpointed in cut order, so
 rerunning the same command resumes at the next cut. For scheduled chunking,

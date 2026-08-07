@@ -92,4 +92,8 @@ exist and report pass.
 - The exhaustive matrix can be large. This record reports only actual measured
   counts; it never substitutes estimated or fabricated totals. The current
   clean auto-confirm trace contains 36,852 completed operations. The complete
-  five-repetition matrix has not run, so the verdict remains `NOT PROVEN`.
+  five-repetition matrix has not run, so the verdict remains `NOT PROVEN`. On
+  the current 16-core host, a verified eight-cut checkpoint took 55.73 seconds;
+  at that measured rate, five full repetitions would take about 14.9 days.
+  Sixteen concurrent sessions were slower (149.55 seconds for 16 cuts), so the
+  default remains the measured eight-session configuration.

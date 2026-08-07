@@ -1,5 +1,5 @@
 IMAGE ?= mcuboot-renode-spike:latest
-MATRIX_JOBS ?= 4
+MATRIX_JOBS ?= 8
 MATRIX_BATCH_LIMIT ?= 0
 HOST_ARTIFACTS := $(CURDIR)/artifacts
 CONTAINER_RUN = docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \

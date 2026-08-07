@@ -11,7 +11,7 @@ readonly evidence_jsonl="${EVIDENCE_OUTPUT:-$(dirname "$matrix_csv")/cutpoint-ev
 readonly trace_log="${trace_dir}/flash-operations.log"
 readonly input_manifest="${trace_dir}/matrix-inputs.json"
 readonly matrix_summary="${matrix_csv%.csv}-summary.json"
-readonly jobs="${MATRIX_JOBS:-4}"
+readonly jobs="${MATRIX_JOBS:-8}"
 readonly batch_limit="${MATRIX_BATCH_LIMIT:-0}"
 
 if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
