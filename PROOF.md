@@ -92,7 +92,9 @@ can write `"verdict": "PROVEN"` only after all preceding verified summaries
 exist and report pass. Both host and container proof entry points remove any
 older final summary before starting, and the aggregator publishes its new
 summary with an atomic rename, so an interrupted rerun cannot retain or expose
-a stale `PROVEN` verdict.
+a stale `PROVEN` verdict. The resumable cut-point matrix also takes an
+exclusive nonblocking lock beside the CSV before reading or appending rows, so
+two proof runs cannot silently interleave checkpoint writes.
 
 ## Latest executed gates
 

@@ -8,6 +8,7 @@ readonly trace_dir="${TRACE_DIR:-${artifacts}/cutpoints/${repetition}/clean-trac
 readonly run_root="${RUN_ROOT:-${artifacts}/cutpoints/${repetition}/runs}"
 readonly matrix_csv="${MATRIX_OUTPUT:-${artifacts}/cutpoint-matrix.csv}"
 readonly evidence_jsonl="${EVIDENCE_OUTPUT:-$(dirname "$matrix_csv")/cutpoint-evidence.jsonl}"
+readonly matrix_lock="${matrix_csv}.lock"
 readonly trace_log="${trace_dir}/flash-operations.log"
 readonly input_manifest="${trace_dir}/matrix-inputs.json"
 readonly matrix_summary="${matrix_csv%.csv}-summary.json"
@@ -22,8 +23,18 @@ if [[ ! "$batch_limit" =~ ^[0-9]+$ ]]; then
     echo "MATRIX_BATCH_LIMIT must be a non-negative integer" >&2
     exit 2
 fi
+command -v flock >/dev/null || {
+    echo "flock is required for matrix checkpoint locking" >&2
+    exit 2
+}
 
 mkdir -p "$trace_dir" "$run_root" "$(dirname "$matrix_csv")"
+
+exec 9>"$matrix_lock"
+if ! flock -n 9; then
+    echo "matrix checkpoint is already locked: $matrix_lock" >&2
+    exit 2
+fi
 
 if [[ -f "$matrix_csv" && ! -f "$trace_log" ]]; then
     echo "cannot resume matrix without its clean reference trace: $trace_log" >&2
