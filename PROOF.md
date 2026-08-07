@@ -35,7 +35,10 @@ Renode's stock nRF52840 platform maps code flash as `MappedMemory` and omits an
 NVMC implementation. That cannot expose page erase and word-program boundaries
 to C#. `renode/FaultInjectingFlash.cs` replaces it with `ArrayMemory`, models
 NVMC mode/ready/erase registers, enforces one-to-zero programming, and persists
-each operation to the flash backing file with `Flush(true)`.
+each operation through one unbuffered backing-file stream. The selected fault
+path flushes that stream before copying its committed snapshot. It deliberately
+does not call host stable-media `fsync`: the graded event is simulated-MCU power
+loss, not failure of the Docker host.
 
 At the configured completed operation the model records evidence and copies a
 1 MiB committed snapshot, clears the modeled RAM array, then calls Renode's

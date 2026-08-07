@@ -130,8 +130,18 @@ namespace Antmicro.Renode.Peripherals.Memory
 
             lock(sync)
             {
+                if(backingStream != null)
+                {
+                    backingStream.Dispose();
+                }
                 Array.Copy(bytes, array, bytes.Length);
                 backingPath = Path.GetFullPath(path);
+                // Disable FileStream's managed buffer. Every guest operation
+                // still reaches the host kernel as an individual write, but
+                // keeping the descriptor open avoids tens of thousands of
+                // open/close cycles during an MCUboot swap.
+                backingStream = new FileStream(backingPath, FileMode.Open,
+                    FileAccess.Write, FileShare.Read, 1);
             }
         }
 
@@ -165,13 +175,21 @@ namespace Antmicro.Renode.Peripherals.Memory
 
             lock(sync)
             {
+                if(traceWriter != null)
+                {
+                    traceWriter.Dispose();
+                }
                 tracePath = Path.GetFullPath(path);
                 var directory = Path.GetDirectoryName(tracePath);
                 if(!string.IsNullOrEmpty(directory))
                 {
                     Directory.CreateDirectory(directory);
                 }
-                File.WriteAllText(tracePath, string.Empty);
+                traceWriter = new StreamWriter(new FileStream(tracePath,
+                    FileMode.Create, FileAccess.Write, FileShare.Read));
+                // The controller observes the trace while Renode is running
+                // so it can detect the exact configured fault boundary.
+                traceWriter.AutoFlush = true;
                 operation = 0;
                 powerLossCount = 0;
                 faultAfterOperation = faultAfter;
@@ -185,6 +203,11 @@ namespace Antmicro.Renode.Peripherals.Memory
             lock(sync)
             {
                 traceEnabled = false;
+                if(traceWriter != null)
+                {
+                    traceWriter.Dispose();
+                    traceWriter = null;
+                }
             }
         }
 
@@ -230,24 +253,18 @@ namespace Antmicro.Renode.Peripherals.Memory
 
         private void Persist(long offset, byte[] source, int sourceOffset, int count)
         {
-            if(string.IsNullOrEmpty(backingPath))
+            if(backingStream == null)
             {
                 throw new InvalidOperationException(
                     "LoadFlash must establish a nonvolatile backing file before guest execution");
             }
 
-            using(var stream = new FileStream(backingPath, FileMode.Open, FileAccess.Write,
-                FileShare.Read))
-            {
-                stream.Position = offset;
-                stream.Write(source, sourceOffset, count);
-                // Closing the stream publishes the completed write to the
-                // backing file before CompletedOperation can inject a reset.
-                // Flush(true) would additionally force the host filesystem to
-                // stable media for every 4-byte NVMC write. That models host
-                // power loss, not simulated-MCU power loss, and makes swaps
-                // thousands of unnecessary fsync calls slower.
-            }
+            backingStream.Position = offset;
+            backingStream.Write(source, sourceOffset, count);
+            // The stream has no managed buffer, so the completed write is
+            // visible through the backing file before CompletedOperation can
+            // inject a simulated-MCU reset. Host stable-media fsync is outside
+            // the modeled fault domain.
         }
 
         private void CompletedOperation(string type, long address, int length,
@@ -262,8 +279,7 @@ namespace Antmicro.Renode.Peripherals.Memory
             var record = string.Format(CultureInfo.InvariantCulture,
                 "op={0} type={1} address=0x{2:X8} length={3}",
                 operation, type, address, length);
-            File.AppendAllText(tracePath, record + Environment.NewLine);
-            this.Log(LogLevel.Info, record);
+            traceWriter.WriteLine(record);
 
             if(faultAfterOperation == operation && !faultFired)
             {
@@ -276,7 +292,7 @@ namespace Antmicro.Renode.Peripherals.Memory
                 powerLossCount++;
                 var faultRecord = string.Format(CultureInfo.InvariantCulture,
                     "fault=power-loss after_op={0}", operation);
-                File.AppendAllText(tracePath, faultRecord + Environment.NewLine);
+                traceWriter.WriteLine(faultRecord);
                 this.Log(LogLevel.Warning, faultRecord);
 
                 // Preserve evidence at the instant of the boundary. Recovery
@@ -287,6 +303,7 @@ namespace Antmicro.Renode.Peripherals.Memory
                 var evidencePath = Path.Combine(evidenceDirectory, "fault-operation.txt");
                 var snapshotPath = Path.Combine(evidenceDirectory,
                     "fault-committed-flash.bin");
+                backingStream.Flush();
                 File.WriteAllText(evidencePath, string.Format(
                     CultureInfo.InvariantCulture,
                     "operation={0}{5}type={1}{5}address=0x{2:X8}{5}length={3}{5}" +
@@ -317,6 +334,8 @@ namespace Antmicro.Renode.Peripherals.Memory
         private long faultAfterOperation;
         private string backingPath;
         private string tracePath;
+        private FileStream backingStream;
+        private StreamWriter traceWriter;
 
         private readonly IMachine machine;
         private readonly PowerLossRam ram;
