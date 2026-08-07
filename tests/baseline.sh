@@ -6,6 +6,8 @@ readonly output_root="${app_root}/artifacts/baseline"
 readonly fixtures="${app_root}/fixtures"
 
 mkdir -p "$output_root"
+python3 "$app_root/tests/verify_fixtures.py" \
+    --fixtures "$fixtures" --output "$output_root/fixture-verification.json"
 python3 "$app_root/controller/ota_controller.py" initialize-baseline \
     --output-dir "$output_root"
 test "$(stat -c %s "$output_root/baseline-flash.bin")" -eq 1048576

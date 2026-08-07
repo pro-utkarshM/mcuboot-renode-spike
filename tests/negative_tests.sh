@@ -5,6 +5,8 @@ readonly app_root="${APP_ROOT:-/workspace/app}"
 readonly artifacts="${app_root}/artifacts/negative-tests"
 readonly fixtures="${app_root}/fixtures"
 mkdir -p "$artifacts"
+python3 "$app_root/tests/verify_fixtures.py" \
+    --fixtures "$fixtures" --output "$artifacts/fixture-verification.json"
 
 run_negative() {
     local variant="$1"

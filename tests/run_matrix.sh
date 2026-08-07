@@ -30,7 +30,11 @@ command -v flock >/dev/null || {
 
 mkdir -p "$trace_dir" "$run_root" "$(dirname "$matrix_csv")"
 
-exec 9>"$matrix_lock"
+if [[ ! -e "$matrix_lock" ]]; then
+    : > "$matrix_lock"
+    chmod 0666 "$matrix_lock"
+fi
+exec 9<"$matrix_lock"
 if ! flock -n 9; then
     echo "matrix checkpoint is already locked: $matrix_lock" >&2
     exit 2
@@ -40,6 +44,10 @@ if [[ -f "$matrix_csv" && ! -f "$trace_log" ]]; then
     echo "cannot resume matrix without its clean reference trace: $trace_log" >&2
     exit 2
 fi
+
+python3 "$app_root/tests/verify_fixtures.py" \
+    --fixtures "$app_root/fixtures" \
+    --output "$(dirname "$matrix_csv")/fixture-verification.json"
 
 if [[ ! -f "$trace_log" ]]; then
     python3 "$app_root/controller/ota_controller.py" trace --output-dir "$trace_dir"

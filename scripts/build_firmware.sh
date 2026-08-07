@@ -31,6 +31,10 @@ copy_output() {
     install -D -m 0644 "$source" "${FIXTURES_DIR}/${destination}"
 }
 
+fixture_sha256() {
+    sha256sum "${FIXTURES_DIR}/$1" | awk '{print $1}'
+}
+
 build_sysbuild() {
     local name="$1"
     local app_dir="$2"
@@ -75,8 +79,12 @@ build_sysbuild v2-auto-confirm "${APP_ROOT}/firmware/v2" auto-confirm.conf
 build_sysbuild v2-negative-premature-confirm "${APP_ROOT}/firmware/v2" negative-premature-confirm.conf
 build_sysbuild v2-negative-erase-after-confirm "${APP_ROOT}/firmware/v2" negative-erase-after-confirm.conf
 
-cmp -s "${FIXTURES_DIR}/v1-mcuboot.bin" "${FIXTURES_DIR}/v2-mcuboot.bin" \
-    || die "MCUboot changed between the v1 and v2 sysbuild domains"
+for image in v2 v2-auto-confirm v2-negative-premature-confirm \
+    v2-negative-erase-after-confirm; do
+    cmp -s "${FIXTURES_DIR}/v1-mcuboot.bin" \
+        "${FIXTURES_DIR}/${image}-mcuboot.bin" \
+        || die "MCUboot changed between v1 and ${image} sysbuild domains"
+done
 
 # A sealed v1 is the only immutable baseline binary.  The controller converts
 # this and MCUboot's genuine sysbuild output into a full flash image; this
@@ -85,6 +93,11 @@ install -D -m 0444 "${FIXTURES_DIR}/v1-signed.bin" "${FIXTURES_DIR}/sealed-v1-si
 printf '%s\n' \
     "zephyr_revision=684c9e8f32e4373a21098559f748f06915f950c9" \
     "board=${BOARD}" \
-    "v1=$(sha256sum "${FIXTURES_DIR}/v1-signed.bin" | awk '{print $1}')" \
-    "v2=$(sha256sum "${FIXTURES_DIR}/v2-signed.bin" | awk '{print $1}')" \
+    "mcuboot=$(fixture_sha256 v1-mcuboot.bin)" \
+    "v1=$(fixture_sha256 v1-signed.bin)" \
+    "sealed_v1=$(fixture_sha256 sealed-v1-signed.bin)" \
+    "v2=$(fixture_sha256 v2-signed.bin)" \
+    "v2_auto_confirm=$(fixture_sha256 v2-auto-confirm-signed.bin)" \
+    "v2_negative_premature_confirm=$(fixture_sha256 v2-negative-premature-confirm-signed.bin)" \
+    "v2_negative_erase_after_confirm=$(fixture_sha256 v2-negative-erase-after-confirm-signed.bin)" \
     > "${FIXTURES_DIR}/firmware-builds.sha256"

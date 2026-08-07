@@ -41,7 +41,9 @@ The final image layer makes the controller, verifier, Renode model, signed
 fixtures, sealed v1 image, and their parent directories root-owned. The proof
 runs as UID 10001 and cannot rewrite those proof inputs. Baseline initialization
 therefore writes its generated flash image under `artifacts/`, not back into
-the sealed `fixtures/` directory.
+the sealed `fixtures/` directory. The generated firmware manifest records
+MCUboot and every signed image consumed by the baseline, matrix, and negative
+controls; those gates verify the hashes and sealed v1 copy before using them.
 
 Renode's stock nRF52840 platform maps code flash as `MappedMemory` and omits an
 NVMC implementation. That cannot expose page erase and word-program boundaries
@@ -113,10 +115,17 @@ runner/resume safety check, not a substitute for the complete proof.
 After sealing the proof inputs against UID 10001 writes and relocating the
 generated initialized flash to `artifacts/baseline/`, the baseline, both
 negative controls, and the expanded unprivileged gate passed again. Two resumed
-batches advanced the contiguous standalone checkpoint through cut 24 and again
-returned the intentional incomplete status. The later top-level run began with
-a deliberately seeded stale `PROVEN` summary; the proof entry point removed it
-before building and did not publish a replacement after the bounded failure.
+batches advanced the former contiguous standalone checkpoint through cut 24 and
+again returned the intentional incomplete status. The later top-level run began
+with a deliberately seeded stale `PROVEN` summary; the proof entry point removed
+it before building and did not publish a replacement after the bounded failure.
+
+After extending the firmware manifest to cover every signed fixture and
+rebuilding the image, the old generated matrix checkpoint was archived because
+its recorded signed-image hashes no longer matched the rebuilt proof inputs. A
+fresh bounded `MATRIX_BATCH_LIMIT=1 make matrix` run passed the baseline and
+fixture gates, generated a new clean trace, checkpointed cuts 1 through 8, and
+returned the intentional incomplete status.
 
 ## Known limitations
 
