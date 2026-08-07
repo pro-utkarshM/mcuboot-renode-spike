@@ -27,9 +27,10 @@ control, or privilege check keeps this verdict at `NOT PROVEN`.
 The target is upstream `nrf52840dk/nrf52840`. West sysbuild produces a real
 MCUboot domain and imgtool-signed application image. MCUboot boots v1, Zephyr's
 SMP server accepts Apache MCUmgr image upload/test/confirm commands on UART0,
-and Renode exposes UART0 as `/tmp/mcumgr-uart`. OTA bytes therefore enter the
-secondary slot through the guest Zephyr flash driver; only factory provisioning
-assembles MCUboot and v1 directly into a blank 1 MiB flash image.
+and Renode exposes UART0 as a PTY in a session-private temporary directory. OTA
+bytes therefore enter the secondary slot through the guest Zephyr flash driver;
+only factory provisioning assembles MCUboot and v1 directly into a blank 1 MiB
+flash image.
 
 Renode's stock nRF52840 platform maps code flash as `MappedMemory` and omits an
 NVMC implementation. That cannot expose page erase and word-program boundaries

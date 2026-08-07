@@ -1,9 +1,6 @@
-# Create the Renode machine and its UART PTY. The controller copies the exact
-# input flash to /tmp/ota-flash.bin before launch, sets FAULT_AFTER_OPERATION,
-# and uses CLI -e commands to begin tracing and start emulation.
+# Create the path-neutral Renode machine. The controller gives every session a
+# private runtime directory, then uses ordered CLI -e commands to attach its
+# UART PTY/backend, load its exact flash input, begin tracing, and start.
 
-emulation CreateUartPtyTerminal "mcumgr_term" "/tmp/mcumgr-uart"
 mach create "ota"
 machine LoadPlatformDescription @/workspace/app/renode/platform.repl
-connector Connect sysbus.uart0 mcumgr_term
-sysbus.flash LoadFlash @/tmp/ota-flash.bin

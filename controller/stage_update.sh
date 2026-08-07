@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The executable OTA staging path lives in ota_controller.py::stage_update and
-# invokes Apache mcumgr over /tmp/mcumgr-uart. This wrapper is intentionally
-# narrow so CI has an obvious, auditable entry point.
+# invokes Apache mcumgr over the session-private UART PTY. This wrapper is
+# intentionally narrow so CI has an obvious, auditable entry point.
 set -euo pipefail
 
 readonly output_dir="${1:?usage: stage_update.sh OUTPUT_DIR [IMAGE]}"

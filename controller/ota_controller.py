@@ -26,17 +26,6 @@ SLOT0_OFFSET = 0x0C000
 SLOT_SIZE = 0x76000
 STORAGE_OFFSET = 0x0F8000
 OTA_BOOT_TIMEOUT = 240.0
-PTY = Path("/tmp/mcumgr-uart")
-FLASH = Path("/tmp/ota-flash.bin")
-UART = Path("/tmp/uart.log")
-TRACE = Path("/tmp/flash-operations.log")
-RENODE_LOG = Path("/tmp/renode-process.log")
-FAULT_EVIDENCE = Path("/tmp/fault-operation.txt")
-FAULT_SNAPSHOT = Path("/tmp/fault-committed-flash.bin")
-SERIAL_ARGS = [
-    "mcumgr", "--conntype", "serial", "--connstring",
-    "dev=/tmp/mcumgr-uart,baud=115200,mtu=256",
-]
 
 
 class ControllerError(RuntimeError):
@@ -46,13 +35,6 @@ class ControllerError(RuntimeError):
 def require_file(path: Path) -> None:
     if not path.is_file():
         raise ControllerError(f"required file is missing: {path}")
-
-
-def read_uart(start: int = 0) -> str:
-    try:
-        return UART.read_bytes()[start:].decode("utf-8", errors="ignore")
-    except FileNotFoundError:
-        return ""
 
 
 def wait_for(predicate, description: str, timeout: float = 30.0) -> None:
@@ -75,29 +57,39 @@ class RenodeSession:
         self.process: subprocess.Popen[bytes] | None = None
         self._renode_stream = None
         self._renode_home: Path | None = None
+        self._runtime_dir: Path | None = None
+        self.pty: Path | None = None
+        self.flash: Path | None = None
+        self.uart: Path | None = None
+        self.trace_path: Path | None = None
+        self.renode_log: Path | None = None
+        self.fault_evidence: Path | None = None
+        self.fault_snapshot: Path | None = None
         self.mcumgr_log = output_dir / "mcumgr-commands.log"
 
     def start(self) -> "RenodeSession":
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        for path in (PTY, FLASH, UART, TRACE, RENODE_LOG, FAULT_EVIDENCE,
-                     FAULT_SNAPSHOT):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-        # Renode opens uart.log.1 when a stale backend exists.
-        for path in Path("/tmp").glob("uart.log.*"):
-            path.unlink()
-        shutil.copyfile(self.source_flash, FLASH)
+        self._runtime_dir = Path(tempfile.mkdtemp(prefix="ota-emulator-run-"))
+        self.pty = self._runtime_dir / "mcumgr-uart"
+        self.flash = self._runtime_dir / "ota-flash.bin"
+        self.uart = self._runtime_dir / "uart.log"
+        self.trace_path = self._runtime_dir / "flash-operations.log"
+        self.renode_log = self._runtime_dir / "renode-process.log"
+        self.fault_evidence = self._runtime_dir / "fault-operation.txt"
+        self.fault_snapshot = self._runtime_dir / "fault-committed-flash.bin"
+        shutil.copyfile(self.source_flash, self.flash)
 
         args = [
             "renode", "--disable-gui", "--hide-log", "--port", "0",
             str(ROOT / "renode" / "boot.resc"),
-            "-e", "uart0 CreateFileBackend @/tmp/uart.log true",
+            "-e", f'emulation CreateUartPtyTerminal "mcumgr_term" "{self.pty}"',
+            "-e", "connector Connect sysbus.uart0 mcumgr_term",
+            "-e", f"sysbus.flash LoadFlash @{self.flash}",
+            "-e", f"uart0 CreateFileBackend @{self.uart} true",
         ]
         if self.trace:
             args += ["-e", "sysbus.flash BeginTraceFromEnvironment "
-                     "@/tmp/flash-operations.log"]
+                     f"@{self.trace_path}"]
         args += ["-e", "start"]
         env = os.environ.copy()
         env["FAULT_AFTER_OPERATION"] = str(self.fault_after)
@@ -108,11 +100,11 @@ class RenodeSession:
         # Do not use Renode's own /tmp/renode-* namespace: its startup
         # scavenger removes stale entries there, including a freshly created
         # config home.
-        self._renode_home = Path(tempfile.mkdtemp(prefix="ota-emulator-home-"))
+        self._renode_home = self._runtime_dir / "home"
         env["HOME"] = str(self._renode_home)
         env["XDG_CONFIG_HOME"] = str(self._renode_home / ".config")
         (self._renode_home / ".config" / "renode").mkdir(parents=True)
-        self._renode_stream = RENODE_LOG.open("wb")
+        self._renode_stream = self.renode_log.open("wb")
         self.process = subprocess.Popen(
             args, stdin=subprocess.DEVNULL, stdout=self._renode_stream,
             stderr=subprocess.STDOUT, env=env,
@@ -121,8 +113,8 @@ class RenodeSession:
         def ready() -> bool:
             if self.process is not None and self.process.poll() is not None:
                 raise ControllerError(
-                    f"Renode exited during startup; see {RENODE_LOG}")
-            return PTY.exists() and UART.exists()
+                    f"Renode exited during startup; see {self.renode_log}")
+            return self.pty.exists() and self.uart.exists()
 
         try:
             wait_for(ready, "Renode UART PTY", 30.0)
@@ -135,20 +127,29 @@ class RenodeSession:
 
     def uart_offset(self) -> int:
         try:
-            return UART.stat().st_size
+            return self.uart.stat().st_size
         except FileNotFoundError:
             return 0
 
+    def read_uart(self, start: int = 0) -> str:
+        try:
+            return self.uart.read_bytes()[start:].decode("utf-8", errors="ignore")
+        except FileNotFoundError:
+            return ""
+
     def wait_marker(self, marker: str, start: int = 0,
                     timeout: float = 30.0) -> None:
-        wait_for(lambda: marker in read_uart(start),
+        wait_for(lambda: marker in self.read_uart(start),
                  f"UART marker {marker!r}", timeout)
 
     def run_mcumgr(self, *arguments: str, attempts: int = 5,
                    timeout: float = 90.0) -> str:
         last = ""
         for attempt in range(1, attempts + 1):
-            command = SERIAL_ARGS + list(arguments)
+            command = [
+                "mcumgr", "--conntype", "serial", "--connstring",
+                f"dev={self.pty},baud=115200,mtu=256",
+            ] + list(arguments)
             try:
                 result = subprocess.run(
                     command, text=True, stdout=subprocess.PIPE,
@@ -199,18 +200,19 @@ class RenodeSession:
         if self._renode_stream is not None:
             self._renode_stream.close()
         copies = {
-            FLASH: "final-flash.bin",
-            UART: "uart.log",
-            TRACE: "flash-operations.log",
-            RENODE_LOG: "renode-process.log",
-            FAULT_EVIDENCE: "fault-operation.txt",
-            FAULT_SNAPSHOT: "fault-committed-flash.bin",
+            self.flash: "final-flash.bin",
+            self.uart: "uart.log",
+            self.trace_path: "flash-operations.log",
+            self.renode_log: "renode-process.log",
+            self.fault_evidence: "fault-operation.txt",
+            self.fault_snapshot: "fault-committed-flash.bin",
         }
         for source, name in copies.items():
             if source.exists():
                 shutil.copyfile(source, self.output_dir / name)
-        if self._renode_home is not None:
-            shutil.rmtree(self._renode_home, ignore_errors=True)
+        if self._runtime_dir is not None:
+            shutil.rmtree(self._runtime_dir, ignore_errors=True)
+            self._runtime_dir = None
             self._renode_home = None
 
     def __enter__(self) -> "RenodeSession":
@@ -326,8 +328,8 @@ def baseline_proof(output_dir: Path) -> None:
         image_hash = stage_update(session, v2)
         reset_and_wait(session, "2.0.0")
         wait_for(
-            lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
-                     or "DURABLE_STATE=already-present" in read_uart()),
+            lambda: ("DURABLE_WRITE_SENTINEL=1" in session.read_uart()
+                     or "DURABLE_STATE=already-present" in session.read_uart()),
             "durable v2 state before external confirmation", 45.0)
         session.run_mcumgr("image", "confirm", image_hash,
                            attempts=5, timeout=30.0)
@@ -357,8 +359,8 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
             final_image = "v2"
             if negative_marker is None:
                 wait_for(
-                    lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
-                             or "DURABLE_STATE=already-present" in read_uart()),
+                    lambda: ("DURABLE_WRITE_SENTINEL=1" in session.read_uart()
+                             or "DURABLE_STATE=already-present" in session.read_uart()),
                     "durable v2 state marker", 45.0)
                 session.wait_marker("IMAGE_CONFIRMATION=complete", timeout=45.0)
             else:
@@ -367,7 +369,8 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
             def fault_seen() -> bool:
                 try:
                     return f"fault=power-loss after_op={fault_after}" in \
-                        TRACE.read_text(encoding="utf-8", errors="replace")
+                        session.trace_path.read_text(
+                            encoding="utf-8", errors="replace")
                 except FileNotFoundError:
                     return False
 
@@ -382,7 +385,8 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
             # and require a second, post-cut recovery marker. Upload/swap cuts
             # and faults already consumed before this reset need only one.
             try:
-                first_operation_in_range(TRACE, STORAGE_OFFSET, FLASH_SIZE)
+                first_operation_in_range(
+                    session.trace_path, STORAGE_OFFSET, FLASH_SIZE)
                 application_phase_cut = not fault_before_reset
             except ControllerError:
                 application_phase_cut = False
@@ -391,7 +395,7 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
             def recovery_boot_seen() -> bool:
                 markers = re.findall(
                     r"^FIRMWARE_VERSION=(?:1\.0\.0|2\.0\.0)\r?$",
-                    read_uart(reset_offset), flags=re.MULTILINE)
+                    session.read_uart(reset_offset), flags=re.MULTILINE)
                 return len(markers) >= required_boots
 
             wait_for(recovery_boot_seen, "post-fault application boot",
@@ -409,8 +413,9 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
             if final_image == "v2":
                 if negative_marker is None:
                     wait_for(
-                        lambda: ("DURABLE_WRITE_SENTINEL=1" in read_uart()
-                                 or "DURABLE_STATE=already-present" in read_uart()),
+                        lambda: ("DURABLE_WRITE_SENTINEL=1" in session.read_uart()
+                                 or "DURABLE_STATE=already-present" in
+                                 session.read_uart()),
                         "durable v2 state marker", 45.0)
                     session.wait_marker("IMAGE_CONFIRMATION=complete", timeout=45.0)
             elif negative_marker is not None:
@@ -475,16 +480,17 @@ def fault_hook_proof(output_dir: Path) -> None:
                             OTA_BOOT_TIMEOUT)
         session.wait_marker("DURABLE_WRITE_ARMED=1", reset_offset, 30.0)
         wait_for(lambda: f"fault=power-loss after_op={target}" in
-                 TRACE.read_text(encoding="utf-8", errors="replace"),
+                 session.trace_path.read_text(
+                     encoding="utf-8", errors="replace"),
                  "configured power-loss record", 30.0)
 
         def reset_seen_after_arm() -> bool:
-            tail = read_uart(reset_offset)
+            tail = session.read_uart(reset_offset)
             arm = tail.find("DURABLE_WRITE_ARMED=1")
             return arm >= 0 and tail.find("FIRMWARE_VERSION=1.0.0", arm) >= 0
 
         wait_for(reset_seen_after_arm, "post-cut v1 reset vector", 60.0)
-        tail = read_uart(reset_offset)
+        tail = session.read_uart(reset_offset)
         arm = tail.find("DURABLE_WRITE_ARMED=1")
         second_boot = tail.find("FIRMWARE_VERSION=1.0.0", arm)
         if "DURABLE_WRITE_SENTINEL=1" in tail[arm:second_boot]:
