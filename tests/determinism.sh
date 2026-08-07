@@ -10,6 +10,7 @@ matrices=()
 first_matrix="${repetition_root}/1/cutpoint-matrix.csv"
 mkdir -p "$(dirname "$first_matrix")"
 if [[ -f "${artifacts}/cutpoint-matrix.csv" ]]; then
+    "$app_root/tests/run_matrix.sh"
     cp "${artifacts}/cutpoint-matrix.csv" "$first_matrix"
 else
     REPETITION=1 \

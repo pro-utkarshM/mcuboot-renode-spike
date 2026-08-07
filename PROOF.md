@@ -91,10 +91,12 @@ partial-bit behavior during an electrical pulse.
 Successful execution creates the required directories and JSON/CSV records
 under `artifacts/`, ending with `artifacts/proof-summary.json`. That aggregator
 can write `"verdict": "PROVEN"` only after all preceding verified summaries
-exist and report pass. Both host and container proof entry points remove any
-older final summary before starting, and the aggregator publishes its new
-summary with an atomic rename, so an interrupted rerun cannot retain or expose
-a stale `PROVEN` verdict. The resumable cut-point matrix also takes an
+exist and report pass. It also requires matching fixture-verification records
+from the baseline, matrix, and negative-control gates. Both host and container
+proof entry points remove any older final summary before starting, and the
+aggregator publishes its new summary with an atomic rename, so an interrupted
+rerun cannot retain or expose a stale `PROVEN` verdict. The resumable cut-point
+matrix also takes an
 exclusive nonblocking lock beside the CSV before reading or appending rows, so
 two proof runs cannot silently interleave checkpoint writes.
 
@@ -125,7 +127,10 @@ rebuilding the image, the old generated matrix checkpoint was archived because
 its recorded signed-image hashes no longer matched the rebuilt proof inputs. A
 fresh bounded `MATRIX_BATCH_LIMIT=1 make matrix` run passed the baseline and
 fixture gates, generated a new clean trace, checkpointed cuts 1 through 8, and
-returned the intentional incomplete status.
+returned the intentional incomplete status. A bounded
+`MATRIX_BATCH_LIMIT=1 make determinism` run then revalidated that top-level
+matrix through `run_matrix.sh`, checkpointed cuts 9 through 16, and returned
+the same intentional incomplete status.
 
 ## Known limitations
 

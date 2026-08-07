@@ -20,6 +20,24 @@ for name, path in required.items():
         raise SystemExit(f"{name} did not pass: {path}")
     results[name] = payload
 
+fixture_required = {
+    "baseline": artifacts / "baseline" / "fixture-verification.json",
+    "matrix": artifacts / "fixture-verification.json",
+    "negative_tests":
+        artifacts / "negative-tests" / "fixture-verification.json",
+}
+fixture_results = {}
+for name, path in fixture_required.items():
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("result") != "pass":
+        raise SystemExit(f"{name} fixture verification did not pass: {path}")
+    fixture_results[name] = payload
+first_fixture = next(iter(fixture_results.values()))
+for name, payload in fixture_results.items():
+    if payload != first_fixture:
+        raise SystemExit(
+            f"{name} fixture verification does not match the baseline fixtures")
+
 determinism = results["determinism"]
 if determinism.get("repetitions", 0) < 5:
     raise SystemExit("determinism proof has fewer than five repetitions")
@@ -42,6 +60,7 @@ summary = {
     "deterministic_outcomes": determinism["deterministic_outcomes"],
     "hangs": 0,
     "unrecoverable_states": 0,
+    "fixture_verification": fixture_results,
     "gates": results,
 }
 summary_path = artifacts / "proof-summary.json"
