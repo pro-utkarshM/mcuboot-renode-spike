@@ -8,7 +8,7 @@ readonly fixtures="${app_root}/fixtures"
 mkdir -p "$output_root"
 python3 "$app_root/controller/ota_controller.py" initialize-baseline \
     --output-dir "$output_root"
-test "$(stat -c %s "$fixtures/baseline_flash.bin")" -eq 1048576
+test "$(stat -c %s "$output_root/baseline-flash.bin")" -eq 1048576
 python3 "$app_root/controller/ota_controller.py" baseline-proof \
     --output-dir "$output_root"
 python3 "$app_root/controller/ota_controller.py" fault-hook-proof \

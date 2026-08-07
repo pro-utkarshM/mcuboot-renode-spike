@@ -165,7 +165,14 @@ USER root
 RUN renode --version \
     && mcumgr --help >/dev/null
 
-COPY --chown=10001:10001 . /workspace/app
+COPY . /workspace/app
+
+# The proof user may write evidence but cannot rewrite its oracle, emulator
+# model, controller, sealed v1, or signed test images. The initialized baseline
+# is generated under artifacts/ at runtime, so fixtures can remain root-owned.
+RUN chown root:root /workspace/app \
+    && chown -R root:root /workspace/app/fixtures /workspace/app/firmware \
+       /workspace/app/keys /workspace/app/scripts
 USER spike
 
 ENTRYPOINT ["/workspace/app/scripts/container-entrypoint.sh"]

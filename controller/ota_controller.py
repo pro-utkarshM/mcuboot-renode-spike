@@ -20,6 +20,9 @@ if not ROOT.exists():
     ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURES = ROOT / "fixtures"
+ARTIFACTS = ROOT / "artifacts"
+BASELINE_FLASH = ARTIFACTS / "baseline" / "baseline-flash.bin"
+EXPECTED_STATE = ARTIFACTS / "baseline" / "expected-state.json"
 FLASH_SIZE = 1024 * 1024
 BOOT_OFFSET = 0x00000
 SLOT0_OFFSET = 0x0C000
@@ -251,7 +254,7 @@ def initialize_baseline(output_dir: Path) -> None:
                             timeout=30.0)
     initialized = output_dir / "initialization" / "final-flash.bin"
     require_file(initialized)
-    baseline = FIXTURES / "baseline_flash.bin"
+    baseline = BASELINE_FLASH
     baseline.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(initialized, baseline)
     state = {
@@ -263,7 +266,7 @@ def initialize_baseline(output_dir: Path) -> None:
             "primary_slot_offset": f"0x{SLOT0_OFFSET:08x}",
         },
     }
-    (FIXTURES / "expected_state.json").write_text(
+    EXPECTED_STATE.write_text(
         json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -320,7 +323,7 @@ def save_final_list(session: RenodeSession, output_dir: Path) -> str:
 
 
 def baseline_proof(output_dir: Path) -> None:
-    baseline = FIXTURES / "baseline_flash.bin"
+    baseline = BASELINE_FLASH
     v2 = FIXTURES / "v2-signed.bin"
     require_file(baseline)
 
@@ -452,7 +455,7 @@ def first_operation_in_range(trace_path: Path, start: int, end: int) -> int:
 
 def fault_hook_proof(output_dir: Path) -> None:
     """Select the first durable-state program boundary, then cut exactly there."""
-    baseline = FIXTURES / "baseline_flash.bin"
+    baseline = BASELINE_FLASH
     image = FIXTURES / "v2-auto-confirm-signed.bin"
     target_dir = output_dir / "target-discovery"
     with RenodeSession(baseline, target_dir, trace=True) as session:
@@ -564,12 +567,12 @@ def main() -> int:
         elif args.command == "fault-hook-proof":
             fault_hook_proof(args.output_dir)
         elif args.command == "trace":
-            traced_update(FIXTURES / "baseline_flash.bin", args.image,
+            traced_update(BASELINE_FLASH, args.image,
                           args.output_dir)
         elif args.command == "cutpoint":
             if args.cut < 1:
                 raise ControllerError("cut point must be positive")
-            traced_update(FIXTURES / "baseline_flash.bin", args.image,
+            traced_update(BASELINE_FLASH, args.image,
                           args.output_dir, fault_after=args.cut)
         elif args.command == "negative-cutpoint":
             if args.cut < 1:
@@ -585,7 +588,7 @@ def main() -> int:
                 ),
             }
             image, marker = variants[args.variant]
-            traced_update(FIXTURES / "baseline_flash.bin", image,
+            traced_update(BASELINE_FLASH, image,
                           args.output_dir, fault_after=args.cut,
                           negative_marker=marker)
         return 0

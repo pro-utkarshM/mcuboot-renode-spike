@@ -37,6 +37,12 @@ controller and child device. The OTA slots, settings partition, MCUboot, and
 custom Renode flash model all use the nRF52840's internal NVMC flash; the
 external part is neither accessed by the spike nor present in `platform.repl`.
 
+The final image layer makes the controller, verifier, Renode model, signed
+fixtures, sealed v1 image, and their parent directories root-owned. The proof
+runs as UID 10001 and cannot rewrite those proof inputs. Baseline initialization
+therefore writes its generated flash image under `artifacts/`, not back into
+the sealed `fixtures/` directory.
+
 Renode's stock nRF52840 platform maps code flash as `MappedMemory` and omits an
 NVMC implementation. That cannot expose page erase and word-program boundaries
 to C#. `renode/FaultInjectingFlash.cs` replaces it with `ArrayMemory`, models
@@ -77,6 +83,8 @@ partial-bit behavior during an electrical pulse.
    deterministic cut point.
 8. The runtime is non-root, every capability set is zero, only loopback
    networking exists, and KVM, TAP, physical serial and Docker socket are absent.
+   The same gate asserts that signed fixtures, the sealed v1 image, controller,
+   verifier, and Renode fault model are not writable by the runtime user.
 
 Successful execution creates the required directories and JSON/CSV records
 under `artifacts/`, ending with `artifacts/proof-summary.json`. That aggregator
@@ -96,6 +104,12 @@ Make because 30,701 cuts and all five complete repetitions still remained. Its
 partial matrix validated as contiguous and passing, its compact evidence had
 exactly eight records, and `artifacts/proof-summary.json` was absent. This is a
 runner/resume safety check, not a substitute for the complete proof.
+
+After sealing the proof inputs against UID 10001 writes and relocating the
+generated initialized flash to `artifacts/baseline/`, the baseline, both
+negative controls, and the expanded unprivileged gate passed again. A resumed
+batch advanced the contiguous standalone checkpoint through cut 16 and again
+returned the intentional incomplete status.
 
 ## Known limitations
 

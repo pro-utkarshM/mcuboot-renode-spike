@@ -13,6 +13,25 @@ cat /proc/1/comm > "$output/pid1-comm.txt"
 cat /proc/net/dev > "$output/network-devices.txt"
 cat /proc/self/mountinfo > "$output/mountinfo.txt"
 
+readonly sealed_paths=(
+    "$app_root"
+    "$app_root/fixtures"
+    "$app_root/fixtures/sealed-v1-signed.bin"
+    "$app_root/fixtures/v2-auto-confirm-signed.bin"
+    "$app_root/renode"
+    "$app_root/renode/FaultInjectingFlash.cs"
+    "$app_root/controller"
+    "$app_root/controller/ota_controller.py"
+    "$app_root/tests"
+    "$app_root/tests/verify_state.py"
+)
+: > "$output/sealed-paths.txt"
+for path in "${sealed_paths[@]}"; do
+    test -e "$path"
+    test ! -w "$path"
+    stat -c '%U:%G %a %n' "$path" >> "$output/sealed-paths.txt"
+done
+
 test "$(id -u)" -ne 0
 test "$(awk '/^Cap(Inh|Prm|Eff|Bnd|Amb):/ { if ($2 != "0000000000000000") bad=1 } END { print bad+0 }' "$output/capabilities.txt")" -eq 0
 test ! -e /dev/kvm
@@ -41,6 +60,7 @@ payload = {
     "docker_socket": False,
     "host_pid_namespace": False,
     "host_network_namespace": False,
+    "sealed_inputs_read_only": True,
 }
 (root / "unprivileged-summary.json").write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

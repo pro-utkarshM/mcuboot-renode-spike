@@ -39,7 +39,7 @@ python3 "$app_root/tests/verify_state.py" parse-trace \
 readonly operation_count="$(grep -c '^op=' "$trace_log")"
 test "$operation_count" -gt 0
 
-python3 - "$app_root/fixtures/baseline_flash.bin" \
+python3 - "$artifacts/baseline/baseline-flash.bin" \
     "$app_root/fixtures/v2-auto-confirm-signed.bin" "$trace_log" \
     "$input_manifest" "$operation_count" <<'PY'
 import hashlib
