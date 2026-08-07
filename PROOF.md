@@ -89,7 +89,10 @@ partial-bit behavior during an electrical pulse.
 Successful execution creates the required directories and JSON/CSV records
 under `artifacts/`, ending with `artifacts/proof-summary.json`. That aggregator
 can write `"verdict": "PROVEN"` only after all preceding verified summaries
-exist and report pass.
+exist and report pass. Both host and container proof entry points remove any
+older final summary before starting, and the aggregator publishes its new
+summary with an atomic rename, so an interrupted rerun cannot retain or expose
+a stale `PROVEN` verdict.
 
 ## Latest executed gates
 
@@ -107,9 +110,11 @@ runner/resume safety check, not a substitute for the complete proof.
 
 After sealing the proof inputs against UID 10001 writes and relocating the
 generated initialized flash to `artifacts/baseline/`, the baseline, both
-negative controls, and the expanded unprivileged gate passed again. A resumed
-batch advanced the contiguous standalone checkpoint through cut 16 and again
-returned the intentional incomplete status.
+negative controls, and the expanded unprivileged gate passed again. Two resumed
+batches advanced the contiguous standalone checkpoint through cut 24 and again
+returned the intentional incomplete status. The later top-level run began with
+a deliberately seeded stale `PROVEN` summary; the proof entry point removed it
+before building and did not publish a replacement after the bounded failure.
 
 ## Known limitations
 

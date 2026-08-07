@@ -44,6 +44,9 @@ summary = {
     "unrecoverable_states": 0,
     "gates": results,
 }
-(artifacts / "proof-summary.json").write_text(
+summary_path = artifacts / "proof-summary.json"
+temporary_path = artifacts / ".proof-summary.json.tmp"
+temporary_path.write_text(
     json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(temporary_path, summary_path)
 print(json.dumps(summary, indent=2, sort_keys=True))

@@ -47,7 +47,13 @@ prove-unprivileged-in-container:
 	@test -x tests/test_unprivileged.sh || { echo "error: tests/test_unprivileged.sh is required; no privilege proof was fabricated" >&2; exit 2; }
 	./tests/test_unprivileged.sh
 
-proof-in-container: baseline-in-container matrix-in-container determinism-in-container negative-tests-in-container prove-unprivileged-in-container
+proof-in-container:
+	$(RM) artifacts/proof-summary.json artifacts/.proof-summary.json.tmp
+	$(MAKE) baseline-in-container
+	./tests/run_matrix.sh
+	./tests/determinism.sh
+	./tests/negative_tests.sh
+	./tests/test_unprivileged.sh
 	python3 tests/verify_state.py self-test
 	python3 tests/finalize_proof.py
 	@test -f artifacts/proof-summary.json || { echo "error: proof did not create artifacts/proof-summary.json" >&2; exit 2; }
@@ -76,7 +82,10 @@ negative-tests: image prepare-artifacts
 prove-unprivileged: image prepare-artifacts
 	$(CONTAINER_RUN) $(IMAGE) make prove-unprivileged
 
-proof: image prepare-artifacts
+proof:
+	$(RM) $(HOST_ARTIFACTS)/proof-summary.json $(HOST_ARTIFACTS)/.proof-summary.json.tmp
+	$(MAKE) prepare-artifacts
+	$(MAKE) image
 	$(CONTAINER_RUN) $(IMAGE) make proof
 
 endif
