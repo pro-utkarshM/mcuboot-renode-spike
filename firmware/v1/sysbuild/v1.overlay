@@ -1,0 +1,8 @@
+/* The spike uses only nRF52840 internal NVMC flash. */
+&qspi {
+	status = "disabled";
+};
+
+&mx25r64 {
+	status = "disabled";
+};

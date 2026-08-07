@@ -32,6 +32,11 @@ bytes therefore enter the secondary slot through the guest Zephyr flash driver;
 only factory provisioning assembles MCUboot and v1 directly into a blank 1 MiB
 flash image.
 
+The application-domain sysbuild overlays disable the DK's external QSPI flash
+controller and child device. The OTA slots, settings partition, MCUboot, and
+custom Renode flash model all use the nRF52840's internal NVMC flash; the
+external part is neither accessed by the spike nor present in `platform.repl`.
+
 Renode's stock nRF52840 platform maps code flash as `MappedMemory` and omits an
 NVMC implementation. That cannot expose page erase and word-program boundaries
 to C#. `renode/FaultInjectingFlash.cs` replaces it with `ArrayMemory`, models
@@ -91,7 +96,7 @@ exist and report pass.
   material.
 - The exhaustive matrix can be large. This record reports only actual measured
   counts; it never substitutes estimated or fabricated totals. The current
-  44,264-byte signed auto-confirm image produces a clean trace of 33,667
+  40,640-byte signed auto-confirm image produces a clean trace of 30,709
   completed operations. The complete five-repetition matrix has not run, so
   the verdict remains `NOT PROVEN`. Earlier concurrency measurements selected
   eight sessions over sixteen; the final runtime projection must be remeasured
