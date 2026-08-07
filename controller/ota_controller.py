@@ -150,6 +150,7 @@ class RenodeSession:
                 "mcumgr", "--conntype", "serial", "--connstring",
                 f"dev={self.pty},baud=115200,mtu=256",
             ] + list(arguments)
+            attempt_started = time.monotonic()
             try:
                 result = subprocess.run(
                     command, text=True, stdout=subprocess.PIPE,
@@ -166,13 +167,14 @@ class RenodeSession:
                     stderr = stderr.decode("utf-8", errors="replace")
                 last = stdout + stderr
                 rc = 124
+            elapsed = time.monotonic() - attempt_started
             semantic_error = bool(re.search(r"(?m)^Error(?:\s+response)?:", last))
             with self.mcumgr_log.open("a", encoding="utf-8") as stream:
                 stream.write(f"$ {' '.join(command)}\n")
                 stream.write(last)
                 stream.write(
                     f"\nreturncode={rc} semantic_error={semantic_error} "
-                    f"attempt={attempt}\n")
+                    f"attempt={attempt} elapsed_seconds={elapsed:.3f}\n")
             if rc == 0 and not semantic_error:
                 return last
             if semantic_error:

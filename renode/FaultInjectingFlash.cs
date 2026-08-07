@@ -84,12 +84,21 @@ namespace Antmicro.Renode.Peripherals.Memory
 
             lock(sync)
             {
-                var before = new byte[pageSize];
-                Array.Copy(array, checked((int)address), before, 0, pageSize);
+                var captureEvidence = NextOperationTriggersFault();
+                byte[] before = null;
+                if(captureEvidence)
+                {
+                    before = new byte[pageSize];
+                    Array.Copy(array, checked((int)address), before, 0, pageSize);
+                }
                 Array.Fill(array, ErasedValue, checked((int)address), pageSize);
                 Persist(address, array, checked((int)address), pageSize);
-                var after = new byte[pageSize];
-                Array.Copy(array, checked((int)address), after, 0, pageSize);
+                byte[] after = null;
+                if(captureEvidence)
+                {
+                    after = new byte[pageSize];
+                    Array.Copy(array, checked((int)address), after, 0, pageSize);
+                }
                 CompletedOperation("erase", address, pageSize, before, after);
             }
         }
@@ -235,20 +244,35 @@ namespace Antmicro.Renode.Peripherals.Memory
 
             lock(sync)
             {
-                var before = new byte[requested.Length];
-                Array.Copy(array, checked((int)offset), before, 0, requested.Length);
-                var committed = new byte[requested.Length];
+                var captureEvidence = NextOperationTriggersFault();
+                byte[] before = null;
+                if(captureEvidence)
+                {
+                    before = new byte[requested.Length];
+                    Array.Copy(array, checked((int)offset), before, 0, requested.Length);
+                }
                 for(var i = 0; i < requested.Length; ++i)
                 {
                     // Nordic internal flash can only transition one bits to
                     // zero bits until the enclosing page is erased.
                     var index = checked((int)offset + i);
-                    committed[i] = (byte)(array[index] & requested[i]);
-                    array[index] = committed[i];
+                    array[index] = (byte)(array[index] & requested[i]);
                 }
-                Persist(offset, committed, 0, committed.Length);
-                CompletedOperation("program", offset, committed.Length, before, committed);
+                Persist(offset, array, checked((int)offset), requested.Length);
+                byte[] after = null;
+                if(captureEvidence)
+                {
+                    after = new byte[requested.Length];
+                    Array.Copy(array, checked((int)offset), after, 0, requested.Length);
+                }
+                CompletedOperation("program", offset, requested.Length, before, after);
             }
+        }
+
+        private bool NextOperationTriggersFault()
+        {
+            return traceEnabled && !faultFired
+                && faultAfterOperation == operation + 1;
         }
 
         private void Persist(long offset, byte[] source, int sourceOffset, int count)
@@ -283,6 +307,11 @@ namespace Antmicro.Renode.Peripherals.Memory
 
             if(faultAfterOperation == operation && !faultFired)
             {
+                if(before == null || after == null)
+                {
+                    throw new InvalidOperationException(
+                        "selected fault operation lacks before/after evidence");
+                }
                 // The flash bytes and backing file are committed before this
                 // point. Clear volatile RAM, then use Renode's ordinary machine
                 // reset request so CPUs, timers, NVMC, UART and other volatile
