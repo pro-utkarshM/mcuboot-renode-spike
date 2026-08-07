@@ -123,10 +123,11 @@ def require_image_present(flash: bytes, image_path: Path, name: str) -> None:
 
 
 def require_uart_markers(log: str, expected_final: str, durable_state: str) -> None:
-    if re.search(r"^NEGATIVE_", log, re.MULTILINE):
-        fail("UART log identifies an intentionally incorrect firmware variant")
     expected_version = VERSION[expected_final]
-    version_markers = re.findall(r"^FIRMWARE_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$", log, re.MULTILINE)
+    version_matches = list(re.finditer(
+        r"^FIRMWARE_VERSION=([0-9]+\.[0-9]+\.[0-9]+)\r?$", log,
+        re.MULTILINE))
+    version_markers = [match.group(1) for match in version_matches]
     if expected_version not in version_markers:
         fail(f"UART log lacks final firmware version marker FIRMWARE_VERSION={expected_version}")
     ram_markers = re.findall(r"^RAM_BOOT_MARKER_RESET=([0-9]+)$", log, re.MULTILINE)
@@ -136,11 +137,18 @@ def require_uart_markers(log: str, expected_final: str, durable_state: str) -> N
         fail(f"RAM boot marker demonstrates retained volatile state: {ram_markers}")
     if not re.search(r"^PERSISTENT_SETTING=(?:initialized|loaded):generation=1$", log, re.MULTILINE):
         fail("UART log lacks persistent settings generation marker")
-    present = bool(re.search(r"^(?:DURABLE_WRITE_SENTINEL=1|DURABLE_STATE=already-present)$", log, re.MULTILINE))
-    if durable_state == "present" and not present:
-        fail("UART log lacks durable v2-state marker")
-    if durable_state == "absent" and present:
-        fail("UART log contains a durable v2-state marker when it must be absent")
+    final_boot = next(
+        match for match in reversed(version_matches)
+        if match.group(1) == expected_version)
+    final_boot_log = log[final_boot.start():]
+    reloaded = bool(re.search(
+        r"^DURABLE_STATE=already-present\r?$", final_boot_log, re.MULTILINE))
+    written = bool(re.search(
+        r"^DURABLE_WRITE_SENTINEL=1\r?$", final_boot_log, re.MULTILINE))
+    if durable_state == "present" and not reloaded:
+        fail("final v2 reboot did not reload the required durable state")
+    if durable_state == "absent" and (reloaded or written):
+        fail("final firmware boot observed durable v2 state when it must be absent")
 
 
 def require_mcumgr_final(text: str, expected_final: str) -> None:
@@ -328,7 +336,10 @@ class VerifierTests(unittest.TestCase):
             uart = root / "uart.log"
             uart.write_text(
                 "FIRMWARE_VERSION=2.0.0\nRAM_BOOT_MARKER_RESET=1\n"
-                "PERSISTENT_SETTING=loaded:generation=1\nDURABLE_WRITE_SENTINEL=1\n",
+                "PERSISTENT_SETTING=loaded:generation=1\nDURABLE_WRITE_SENTINEL=1\n"
+                "FIRMWARE_VERSION=2.0.0\nRAM_BOOT_MARKER_RESET=1\n"
+                "PERSISTENT_SETTING=loaded:generation=1\n"
+                "DURABLE_STATE=already-present\n",
                 encoding="utf-8")
             mcumgr = root / "mcumgr.txt"
             mcumgr.write_text("image=0 slot=0\nversion: 2.0.0\nflags: active confirmed\n", encoding="utf-8")
@@ -341,6 +352,16 @@ class VerifierTests(unittest.TestCase):
                 v1_image=v1, v2_image=v2, expected_final="v2", fault_operation=1,
                 durable_state="present")
             self.assertEqual(verify_run(args)["result"], "pass")
+
+    def test_deleted_durable_state_is_rejected_after_reboot(self) -> None:
+        log = (
+            "FIRMWARE_VERSION=2.0.0\nRAM_BOOT_MARKER_RESET=1\n"
+            "PERSISTENT_SETTING=loaded:generation=1\nDURABLE_WRITE_SENTINEL=1\n"
+            "FIRMWARE_VERSION=2.0.0\nRAM_BOOT_MARKER_RESET=1\n"
+            "PERSISTENT_SETTING=loaded:generation=1\nDURABLE_WRITE_SENTINEL=1\n"
+        )
+        with self.assertRaises(VerificationError):
+            require_uart_markers(log, "v2", "present")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
