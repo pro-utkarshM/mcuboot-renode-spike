@@ -83,6 +83,20 @@ under `artifacts/`, ending with `artifacts/proof-summary.json`. That aggregator
 can write `"verdict": "PROVEN"` only after all preceding verified summaries
 exist and report pass.
 
+## Latest executed gates
+
+On 2026-08-07, the restrictive offline container invocation passed the baseline
+confirmed-update, repeated-boot, revert, selected-fault, committed-snapshot,
+negative-control, and unprivileged-runtime gates. The clean auto-confirm trace
+contained 30,709 operations.
+
+A deliberately bounded top-level run, `MATRIX_BATCH_LIMIT=1 make proof`, passed
+the baseline, checkpointed cuts 1 through 8, and then returned nonzero through
+Make because 30,701 cuts and all five complete repetitions still remained. Its
+partial matrix validated as contiguous and passing, its compact evidence had
+exactly eight records, and `artifacts/proof-summary.json` was absent. This is a
+runner/resume safety check, not a substitute for the complete proof.
+
 ## Known limitations
 
 - The model covers the NVMC register sequences used by the pinned nRF52840
@@ -98,6 +112,7 @@ exist and report pass.
   counts; it never substitutes estimated or fabricated totals. The current
   40,640-byte signed auto-confirm image produces a clean trace of 30,709
   completed operations. The complete five-repetition matrix has not run, so
-  the verdict remains `NOT PROVEN`. Earlier concurrency measurements selected
-  eight sessions over sixteen; the final runtime projection must be remeasured
-  against this smaller image rather than copied from the superseded build.
+  the verdict remains `NOT PROVEN`. A resumed eight-cut checkpoint took 62.68
+  seconds on the current 16-core host. At that measured rate, five complete
+  repetitions project to about 13.92 days. Sixteen concurrent sessions were
+  slower, so eight remains the measured default.
