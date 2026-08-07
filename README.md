@@ -36,6 +36,22 @@ NVMC program bus transaction as an operation; it does not combine word writes
 to make the run count smaller. Runtime is therefore proportional to the actual
 signed image size and observed operation count.
 
+`tests/run_matrix.sh` runs four session-isolated cut points concurrently by
+default; set `MATRIX_JOBS` to a different positive count when the host has been
+validated for that load. Completed batches are checkpointed in cut order, so
+rerunning the same command resumes at the next cut. For scheduled chunking,
+`MATRIX_BATCH_LIMIT=N` stops after `N` newly completed batches with exit status
+75 while work remains; that nonzero status cannot satisfy `make matrix` or
+`make proof`.
+
+Each cut's full flash image, at-cut snapshot, trace, UART log, and MCUmgr output
+are verified before the batch is checkpointed. The matrix then retains their
+cryptographic hashes and compact verification record in
+`cutpoint-evidence.jsonl`; redundant per-cut bulk files are removed. Raw UART
+hashes remain diagnostic evidence, while determinism compares an ordered hash
+of firmware/reset/persistence markers because binary SMP packet interleaving is
+transport timing, not firmware state.
+
 ## Boundaries and layout
 
 - Zephyr `v4.4.0`, MCUboot and HAL revisions imported by its manifest

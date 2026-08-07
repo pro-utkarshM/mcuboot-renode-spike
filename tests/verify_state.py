@@ -28,6 +28,16 @@ TRACE_RE = re.compile(
 )
 FAULT_RE = re.compile(r"^fault=power-loss after_op=(?P<op>[1-9][0-9]*)$")
 VERSION = {"v1": "1.0.0", "v2": "2.0.0"}
+SEMANTIC_UART_PREFIXES = (
+    "FIRMWARE_VERSION=",
+    "RAM_BOOT_MARKER_RESET=",
+    "PERSISTENT_SETTING=",
+    "DURABLE_WRITE_ARMED=",
+    "DURABLE_WRITE_SENTINEL=",
+    "DURABLE_STATE=",
+    "IMAGE_CONFIRMATION=",
+    "NEGATIVE_",
+)
 CORE_MATRIX_COLUMNS = (
     "cut_point", "operation", "type", "address", "length", "final_image",
     "boots", "state_valid", "result",
@@ -61,6 +71,16 @@ def read_text(path: Path, label: str) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         fail(f"cannot read {label} {path}: {exc}")
+
+
+def semantic_uart_text(log: str) -> str:
+    """Remove binary SMP traffic while retaining ordered firmware evidence."""
+    markers = [
+        line.rstrip("\r")
+        for line in log.splitlines()
+        if line.rstrip("\r").startswith(SEMANTIC_UART_PREFIXES)
+    ]
+    return "\n".join(markers) + ("\n" if markers else "")
 
 
 def parse_trace_text(text: str, source: str) -> Trace:
@@ -178,8 +198,10 @@ def verify_run(args: argparse.Namespace) -> dict[str, object]:
     require_image_present(flash, args.v2_image, "v2")
     # The selected final image must be physically present as a real signed build
     # product, not merely named in UART/MCUmgr output.
-    require_uart_markers(read_text(args.uart_log, "UART log"), args.expected_final, args.durable_state)
-    require_mcumgr_final(read_text(args.mcumgr_list, "mcumgr image list"), args.expected_final)
+    uart_text = read_text(args.uart_log, "UART log")
+    mcumgr_text = read_text(args.mcumgr_list, "mcumgr image list")
+    require_uart_markers(uart_text, args.expected_final, args.durable_state)
+    require_mcumgr_final(mcumgr_text, args.expected_final)
 
     trace = parse_trace_file(args.trace)
     if args.fault_operation is not None:
@@ -195,6 +217,11 @@ def verify_run(args: argparse.Namespace) -> dict[str, object]:
         "result": "pass",
         "final_image": args.expected_final,
         "flash_sha256": hashlib.sha256(flash).hexdigest(),
+        "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
+        "uart_raw_sha256": hashlib.sha256(args.uart_log.read_bytes()).hexdigest(),
+        "uart_semantic_sha256": hashlib.sha256(
+            semantic_uart_text(uart_text).encode("utf-8")).hexdigest(),
+        "mcumgr_sha256": hashlib.sha256(args.mcumgr_list.read_bytes()).hexdigest(),
         "operation_count": len(trace.operations),
         "fault_after_operation": trace.fault_after_operation,
         "durable_state": args.durable_state,
@@ -218,11 +245,59 @@ def read_matrix(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def compare_matrices(paths: Iterable[Path], hash_columns: list[str]) -> dict[str, object]:
+def validate_matrix_rows(path: Path, rows: list[dict[str, str]],
+                         expected_cut_points: int,
+                         require_complete: bool) -> dict[str, object]:
+    if expected_cut_points < 1:
+        fail("expected cut-point count must be positive")
+    if len(rows) > expected_cut_points:
+        fail(f"matrix {path} has {len(rows)} rows; clean trace has "
+             f"{expected_cut_points} operations")
+    for index, row in enumerate(rows, 1):
+        try:
+            cut_point = int(row.get("cut_point", ""))
+            operation = int(row.get("operation", ""))
+            length = int(row.get("length", ""))
+            boots = int(row.get("boots", ""))
+            address = int(row.get("address", ""), 16)
+        except ValueError:
+            fail(f"matrix {path} row {index} has a non-numeric core field")
+        if cut_point != index or operation != index:
+            fail(f"matrix {path} row {index} is not the contiguous cut point {index}")
+        if row.get("type") not in {"program", "erase"}:
+            fail(f"matrix {path} row {index} has invalid operation type")
+        if length < 1 or boots < 1 or address < 0 or address + length > FLASH_SIZE:
+            fail(f"matrix {path} row {index} has invalid length, boots, or address")
+        if row.get("result") != "pass" or row.get("state_valid", "").lower() != "true":
+            fail(f"matrix {path} row {index} is not a valid passing state")
+        if row.get("final_image") not in {"v1", "v2"}:
+            fail(f"matrix {path} row {index} has invalid final_image "
+                 f"{row.get('final_image')!r}")
+    if require_complete and len(rows) != expected_cut_points:
+        fail(f"matrix {path} has {len(rows)} rows; expected the complete "
+             f"{expected_cut_points}")
+    return {
+        "result": "pass",
+        "rows": len(rows),
+        "expected_cut_points": expected_cut_points,
+        "complete": len(rows) == expected_cut_points,
+    }
+
+
+def validate_matrix(path: Path, expected_cut_points: int,
+                    require_complete: bool) -> dict[str, object]:
+    rows = read_matrix(path)
+    return validate_matrix_rows(path, rows, expected_cut_points, require_complete)
+
+
+def compare_matrices(paths: Iterable[Path], hash_columns: list[str],
+                     expected_cut_points: int) -> dict[str, object]:
     paths = list(paths)
     if len(paths) < 2:
         fail("compare-matrix requires at least two repetition CSV files")
     matrices = [read_matrix(path) for path in paths]
+    for path, rows in zip(paths, matrices):
+        validate_matrix_rows(path, rows, expected_cut_points, True)
     fields = list(CORE_MATRIX_COLUMNS) + hash_columns
     if not hash_columns:
         available = set(matrices[0][0])
@@ -243,15 +318,6 @@ def compare_matrices(paths: Iterable[Path], hash_columns: list[str]) -> dict[str
                 if expected.get(field) != actual.get(field):
                     fail(f"matrix {path} row {index} differs in {field}: "
                          f"{actual.get(field)!r} != {expected.get(field)!r}")
-            if actual.get("result") != "pass" or actual.get("state_valid", "").lower() != "true":
-                fail(f"matrix {path} row {index} is not a valid passing state")
-            if actual.get("final_image") not in {"v1", "v2"}:
-                fail(f"matrix {path} row {index} has invalid final_image {actual.get('final_image')!r}")
-    for index, row in enumerate(baseline, 1):
-        if row.get("result") != "pass" or row.get("state_valid", "").lower() != "true":
-            fail(f"matrix {paths[0]} row {index} is not a valid passing state")
-        if row.get("final_image") not in {"v1", "v2"}:
-            fail(f"matrix {paths[0]} row {index} has invalid final_image {row.get('final_image')!r}")
     return {
         "result": "pass",
         "repetitions": len(paths),
@@ -289,11 +355,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--durable-state", choices=("present", "absent", "any"), default="any")
     run.add_argument("--output", type=Path, help="optional JSON destination; otherwise stdout")
 
+    validate = subcommands.add_parser("validate-matrix", help="validate matrix coverage")
+    validate.add_argument("--matrix", required=True, type=Path)
+    validate.add_argument("--expected-cut-points", required=True, type=int)
+    validate.add_argument("--complete", action="store_true")
+    validate.add_argument("--output", type=Path,
+                          help="optional JSON destination; otherwise stdout")
+
     matrix = subcommands.add_parser("compare-matrix", help="compare repetition CSVs")
     matrix.add_argument("--matrix", action="append", required=True, type=Path,
                         help="one matrix CSV; provide once per repetition")
     matrix.add_argument("--hash-column", action="append", default=[],
                         help="stable hash column (default: every *_hash column)")
+    matrix.add_argument("--expected-cut-points", required=True, type=int)
     matrix.add_argument("--output", type=Path, help="optional JSON destination; otherwise stdout")
     subcommands.add_parser("self-test", help="run verifier unit tests")
     return parser
@@ -312,6 +386,19 @@ class VerifierTests(unittest.TestCase):
         with self.assertRaises(VerificationError):
             parse_trace_text("op=2 type=program address=0x0 length=1\n", "test")
 
+    def test_semantic_uart_hash_ignores_smp_transport_bytes(self) -> None:
+        one = (
+            "binary-one\nFIRMWARE_VERSION=2.0.0\r\n"
+            "RAM_BOOT_MARKER_RESET=1\r\n"
+            "PERSISTENT_SETTING=loaded:generation=1\r\n"
+        )
+        two = (
+            "different-packet\nFIRMWARE_VERSION=2.0.0\n"
+            "RAM_BOOT_MARKER_RESET=1\n"
+            "PERSISTENT_SETTING=loaded:generation=1\n"
+        )
+        self.assertEqual(semantic_uart_text(one), semantic_uart_text(two))
+
     def test_matrix_comparison(self) -> None:
         header = ",".join(CORE_MATRIX_COLUMNS + ("flash_hash",))
         row = "1,1,program,0x0,4,v1,2,true,pass,abc"
@@ -319,8 +406,30 @@ class VerifierTests(unittest.TestCase):
             one, two = Path(directory) / "one.csv", Path(directory) / "two.csv"
             one.write_text(header + "\n" + row + "\n", encoding="utf-8")
             two.write_text(header + "\n" + row + "\n", encoding="utf-8")
-            result = compare_matrices([one, two], [])
+            result = compare_matrices([one, two], [], 1)
         self.assertEqual(result["deterministic_outcomes"], 2)
+
+    def test_truncated_matrix_is_rejected_as_complete(self) -> None:
+        header = ",".join(CORE_MATRIX_COLUMNS + ("flash_hash",))
+        row = "1,1,program,0x0,4,v1,2,true,pass,abc"
+        with tempfile.TemporaryDirectory() as directory:
+            matrix = Path(directory) / "partial.csv"
+            matrix.write_text(header + "\n" + row + "\n", encoding="utf-8")
+            with self.assertRaises(VerificationError):
+                validate_matrix(matrix, 2, True)
+
+    def test_matrix_hash_mismatch_is_rejected(self) -> None:
+        header = ",".join(CORE_MATRIX_COLUMNS + ("flash_hash",))
+        with tempfile.TemporaryDirectory() as directory:
+            one, two = Path(directory) / "one.csv", Path(directory) / "two.csv"
+            one.write_text(
+                header + "\n1,1,program,0x0,4,v1,2,true,pass,abc\n",
+                encoding="utf-8")
+            two.write_text(
+                header + "\n1,1,program,0x0,4,v1,2,true,pass,def\n",
+                encoding="utf-8")
+            with self.assertRaises(VerificationError):
+                compare_matrices([one, two], ["flash_hash"], 1)
 
     def test_complete_v2_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -376,8 +485,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.fault_operation is not None and args.fault_operation < 1:
                 fail("--fault-operation must be positive")
             emit(verify_run(args), args.output)
+        elif args.command == "validate-matrix":
+            emit(validate_matrix(
+                args.matrix, args.expected_cut_points, args.complete), args.output)
         elif args.command == "compare-matrix":
-            emit(compare_matrices(args.matrix, args.hash_column), args.output)
+            emit(compare_matrices(
+                args.matrix, args.hash_column, args.expected_cut_points), args.output)
         return 0
     except VerificationError as exc:
         print(f"verification failed: {exc}", file=sys.stderr)

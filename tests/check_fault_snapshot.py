@@ -43,6 +43,9 @@ def main() -> int:
         "type": fields["type"],
         "address": fields["address"],
         "length": length,
+        "before_sha256": fields["before_sha256"],
+        "after_sha256": fields["after_sha256"],
+        "snapshot_sha256": hashlib.sha256(snapshot).hexdigest(),
         "snapshot_matches_committed_bytes": True,
     }
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n",

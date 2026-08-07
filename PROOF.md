@@ -60,9 +60,14 @@ partial-bit behavior during an electrical pulse.
    UART continuation sentinel is absent before the reset-vector marker,
    volatile RAM reports one, persistent state survives, and the cut fires once.
 5. Every operation in the clean ordered trace is used as a cut point; each run
-   restores the identical baseline and converges to a verified v1 or v2.
+   restores the identical baseline and converges to a verified v1 or v2. Full
+   transient evidence is checked before compact hashes and verification JSON
+   are checkpointed in cut order.
 6. Five complete repetitions have identical traces, outcomes, boot counts, and
-   relevant hashes, with no hangs or unrecoverable states.
+   relevant flash, trace, semantic-UART, MCUmgr, and fault-snapshot hashes, with
+   no hangs or unrecoverable states. Raw UART bytes are retained as a diagnostic
+   hash but excluded because SMP packet interleaving varies independently of
+   the ordered firmware markers.
 7. Premature-confirm and erase-after-confirm variants are both rejected at a
    deterministic cut point.
 8. The runtime is non-root, every capability set is zero, only loopback
@@ -85,4 +90,6 @@ exist and report pass.
 - The included signing key is an upstream test key, not production key
   material.
 - The exhaustive matrix can be large. This record reports only actual measured
-  counts; it never substitutes estimated or fabricated totals.
+  counts; it never substitutes estimated or fabricated totals. The current
+  clean auto-confirm trace contains 36,852 completed operations. The complete
+  five-repetition matrix has not run, so the verdict remains `NOT PROVEN`.

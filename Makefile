@@ -1,6 +1,9 @@
 IMAGE ?= mcuboot-renode-spike:latest
+MATRIX_JOBS ?= 4
+MATRIX_BATCH_LIMIT ?= 0
 HOST_ARTIFACTS := $(CURDIR)/artifacts
 CONTAINER_RUN = docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+	--env MATRIX_JOBS=$(MATRIX_JOBS) --env MATRIX_BATCH_LIMIT=$(MATRIX_BATCH_LIMIT) \
 	--volume $(HOST_ARTIFACTS):/workspace/app/artifacts
 
 .DEFAULT_GOAL := proof
