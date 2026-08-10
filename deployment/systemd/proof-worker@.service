@@ -1,0 +1,23 @@
+[Unit]
+Description=OTA proof worker slot %i
+After=local-fs.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/ota-proof/worker.env
+WorkingDirectory=%h
+ExecStart=/bin/bash ${PROOF_REPO}/scripts/distributed/proofctl.sh --config %h/.config/ota-proof/worker.env worker-slot %i
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=15s
+TimeoutStopSec=180s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-%h -/srv/ota-proof
+
+[Install]
+WantedBy=default.target

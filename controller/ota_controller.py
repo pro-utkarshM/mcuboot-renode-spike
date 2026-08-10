@@ -552,8 +552,7 @@ def fault_hook_proof(output_dir: Path) -> None:
                 final_list):
             raise ControllerError("post-cut image state is not confirmed v1")
 
-    (output_dir / "fault-hook-summary.json").write_text(
-        json.dumps({
+    summary = {
             "result": "pass",
             "selected_operation": target,
             "operation_completed_before_reset": True,
@@ -562,7 +561,12 @@ def fault_hook_proof(output_dir: Path) -> None:
             "volatile_ram_marker_after_reset": 1,
             "persistent_v1_state_retained": True,
             "fault_was_one_shot": True,
-        }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    }
+    if os.environ.get("DISTRIBUTED_PROOF_ID"):
+        summary["proof_id"] = os.environ["DISTRIBUTED_PROOF_ID"]
+    (output_dir / "fault-hook-summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
