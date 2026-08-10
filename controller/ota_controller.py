@@ -23,6 +23,8 @@ FIXTURES = ROOT / "fixtures"
 ARTIFACTS = ROOT / "artifacts"
 BASELINE_FLASH = ARTIFACTS / "baseline" / "baseline-flash.bin"
 EXPECTED_STATE = ARTIFACTS / "baseline" / "expected-state.json"
+BOOT_SCRIPT = Path(os.environ.get(
+    "RENODE_BOOT_SCRIPT", ROOT / "renode" / "boot.resc"))
 FLASH_SIZE = 1024 * 1024
 BOOT_OFFSET = 0x00000
 SLOT0_OFFSET = 0x0C000
@@ -72,6 +74,7 @@ class RenodeSession:
 
     def start(self) -> "RenodeSession":
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        require_file(BOOT_SCRIPT)
         self._runtime_dir = Path(tempfile.mkdtemp(prefix="ota-emulator-run-"))
         self.pty = self._runtime_dir / "mcumgr-uart"
         self.flash = self._runtime_dir / "ota-flash.bin"
@@ -84,7 +87,7 @@ class RenodeSession:
 
         args = [
             "renode", "--disable-gui", "--hide-log", "--port", "0",
-            str(ROOT / "renode" / "boot.resc"),
+            str(BOOT_SCRIPT),
             "-e", f'emulation CreateUartPtyTerminal "mcumgr_term" "{self.pty}"',
             "-e", "connector Connect sysbus.uart0 mcumgr_term",
             "-e", f"sysbus.flash LoadFlash @{self.flash}",
@@ -309,6 +312,39 @@ def stage_update(session: RenodeSession, image: Path) -> str:
     return image_hash
 
 
+def fault_transition_complete(session: RenodeSession, fault_after: int) -> bool:
+    """Require the complete hook evidence before treating transport loss as a cut."""
+    if fault_after <= 0 or session.process is None or session.process.poll() is not None:
+        return False
+    try:
+        trace = session.trace_path.read_text(encoding="utf-8", errors="replace")
+        return (
+            f"fault=power-loss after_op={fault_after}\n" in trace
+            and session.fault_evidence.is_file()
+            and session.fault_snapshot.stat().st_size == FLASH_SIZE
+        )
+    except OSError:
+        return False
+
+
+def stage_update_recovery_aware(
+        session: RenodeSession, image: Path, fault_after: int,
+        ) -> tuple[str | None, bool, int]:
+    """Stage an image, or classify a newly observed configured power loss."""
+    recovery_offset = session.uart_offset()
+    fault_was_complete = fault_transition_complete(session, fault_after)
+    try:
+        return stage_update(session, image), False, recovery_offset
+    except ControllerError:
+        # A reset can sever the in-flight SMP transaction after the selected
+        # flash operation has committed. Only a newly completed instance of the
+        # configured fault is allowed to turn that transport failure into the
+        # normal recovery path. Pre-existing or partial evidence fails closed.
+        if fault_was_complete or not fault_transition_complete(session, fault_after):
+            raise
+        return None, True, recovery_offset
+
+
 def reset_and_wait(session: RenodeSession, version: str,
                    timeout: float = OTA_BOOT_TIMEOUT) -> None:
     offset = session.uart_offset()
@@ -356,8 +392,15 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
     with RenodeSession(source_flash, output_dir, fault_after=fault_after,
                        trace=True) as session:
         session.wait_marker("FIRMWARE_VERSION=1.0.0")
-        stage_update(session, image)
-        reset_offset = session.uart_offset()
+        if fault_after == 0:
+            stage_update(session, image)
+            stage_interrupted_by_fault = False
+            stage_recovery_offset = session.uart_offset()
+        else:
+            _, stage_interrupted_by_fault, stage_recovery_offset = \
+                stage_update_recovery_aware(session, image, fault_after)
+        reset_offset = (stage_recovery_offset if stage_interrupted_by_fault
+                        else session.uart_offset())
 
         if fault_after == 0:
             reset_and_wait(session, "2.0.0")
@@ -371,18 +414,13 @@ def traced_update(source_flash: Path, image: Path, output_dir: Path,
             else:
                 session.wait_marker(negative_marker, timeout=45.0)
         else:
-            def fault_seen() -> bool:
-                try:
-                    return f"fault=power-loss after_op={fault_after}" in \
-                        session.trace_path.read_text(
-                            encoding="utf-8", errors="replace")
-                except FileNotFoundError:
-                    return False
-
-            fault_before_reset = fault_seen()
-            session.run_mcumgr("reset", attempts=3, timeout=15.0)
-            wait_for(fault_seen, f"configured power loss after operation {fault_after}",
-                     OTA_BOOT_TIMEOUT)
+            fault_before_reset = fault_transition_complete(session, fault_after)
+            if not stage_interrupted_by_fault:
+                session.run_mcumgr("reset", attempts=3, timeout=15.0)
+            wait_for(
+                lambda: fault_transition_complete(session, fault_after),
+                f"configured power loss after operation {fault_after}",
+                OTA_BOOT_TIMEOUT)
 
             # Do not query the old application in the small interval between
             # an acknowledged reset command and the reset taking effect. Cuts

@@ -1,6 +1,7 @@
-// nRF52840DK platform derived from Renode v1.16.1's
+// Experimental native-RAM platform derived from Renode v1.16.1's
 // platforms/cpus/nrf52840.repl. The stock MappedMemory flash is replaced by
 // FaultInjectingFlash and the otherwise missing NVMC is modeled explicitly.
+// The proof reference remains platform.repl.
 
 nvic: IRQControllers.NVIC @ sysbus 0xE000E000
     -> cpu@0
@@ -34,7 +35,7 @@ wdt: Timers.NRF52840_Watchdog @ sysbus 0x40010000
 
 ppi: Miscellaneous.NRF52840_PPI @ sysbus 0x4001F000
 
-ram: Memory.PowerLossRam @ { sysbus 0x800000; sysbus 0x20000000 }
+ram: Memory.NativePowerLossRam @ { sysbus 0x800000; sysbus 0x20000000 }
     size: 0x40000
 
 flash: Memory.FaultInjectingFlash @ sysbus 0x0

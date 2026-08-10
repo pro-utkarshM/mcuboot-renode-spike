@@ -21,7 +21,21 @@ RUN git init /tmp/mcumgr \
     && cd /tmp/mcumgr/mcumgr \
     && CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /usr/local/bin/mcumgr .
 
-FROM antmicro/renode:1.16.1@sha256:fc2a8c1bad2296a6d7cbc852bbf5540b22b778bdeb0ad42a45b8c54ea1e6a24c
+FROM antmicro/renode:1.16.1@sha256:fc2a8c1bad2296a6d7cbc852bbf5540b22b778bdeb0ad42a45b8c54ea1e6a24c AS renode-base
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0.408-jammy@sha256:6ada82541f36048b7ffe3ef27a948c23a9bc2548b86cb49fcf8dbecf61599a2f AS fault-model-builder
+
+COPY --from=renode-base /opt/renode/bin/Infrastructure.dll /opt/renode/bin/
+COPY --from=renode-base /opt/renode/bin/Migrant.dll /opt/renode/bin/
+COPY --from=renode-base /opt/renode/bin/ELFSharp.dll /opt/renode/bin/
+COPY renode/FaultInjectingFlash.cs renode/NativeFaultInjectingFlash.cs \
+     renode/NativePowerLossRam.cs \
+     renode/FaultInjectingFlash.csproj /src/
+
+RUN dotnet build /src/FaultInjectingFlash.csproj -c Release -o /out \
+      -p:RestoreIgnoreFailedSources=true
+
+FROM renode-base
 
 USER root
 
@@ -166,6 +180,8 @@ RUN renode --version \
     && mcumgr --help >/dev/null
 
 COPY . /workspace/app
+COPY --from=fault-model-builder /out/FaultInjectingFlash.dll \
+    /opt/renode/bin/FaultInjectingFlash.dll
 
 # The proof user may write evidence but cannot rewrite its oracle, emulator
 # model, controller, sealed v1, or signed test images. The initialized baseline

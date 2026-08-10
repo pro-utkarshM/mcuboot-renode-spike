@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>FaultInjectingFlash</AssemblyName>
+    <AssemblyVersion>1.16.1.0</AssemblyVersion>
+    <FileVersion>1.16.1.0</FileVersion>
+    <Version>1.16.1</Version>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <PathMap>/src=/_/</PathMap>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Infrastructure">
+      <HintPath>/opt/renode/bin/Infrastructure.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Migrant">
+      <HintPath>/opt/renode/bin/Migrant.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ELFSharp">
+      <HintPath>/opt/renode/bin/ELFSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,4 @@
+# Experimental native-RAM entry point. The proof reference remains boot.resc.
+
+mach create "ota"
+machine LoadPlatformDescription @/workspace/app/renode/platform-native-ram.repl

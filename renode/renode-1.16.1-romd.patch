@@ -1,0 +1,46 @@
+diff --git a/src/Infrastructure/src/Emulator/Cores/tlib/exports.c b/src/Infrastructure/src/Emulator/Cores/tlib/exports.c
+--- a/src/Infrastructure/src/Emulator/Cores/tlib/exports.c
++++ b/src/Infrastructure/src/Emulator/Cores/tlib/exports.c
+@@ -436,1 +436,10 @@
++void tlib_map_range_romd(uint64_t start_addr, uint64_t length)
++{
++    ram_addr_t phys_offset = start_addr;
++    ram_addr_t size = length;
++    cpu_register_physical_memory(start_addr, size, phys_offset | IO_MEM_ROMD);
++}
++
++EXC_VOID_2(tlib_map_range_romd, uint64_t, start_addr, uint64_t, length)
++
+ void tlib_unmap_range(uint64_t start, uint64_t end)
+diff --git a/src/Infrastructure/src/Emulator/Cores/tlib/include/exports.h b/src/Infrastructure/src/Emulator/Cores/tlib/include/exports.h
+--- a/src/Infrastructure/src/Emulator/Cores/tlib/include/exports.h
++++ b/src/Infrastructure/src/Emulator/Cores/tlib/include/exports.h
+@@ -32,1 +32,2 @@
++void tlib_map_range_romd(uint64_t start_addr, uint64_t length);
+ void tlib_unmap_range(uint64_t start, uint64_t end);
+diff --git a/src/Infrastructure/src/Emulator/Peripherals/Peripherals/CPU/TranslationCPU.cs b/src/Infrastructure/src/Emulator/Peripherals/Peripherals/CPU/TranslationCPU.cs
+--- a/src/Infrastructure/src/Emulator/Peripherals/Peripherals/CPU/TranslationCPU.cs
++++ b/src/Infrastructure/src/Emulator/Peripherals/Peripherals/CPU/TranslationCPU.cs
+@@ -138,1 +138,17 @@
++        public void SetMappedMemoryWritesViaIo(ulong startAddress, ulong size)
++        {
++            using(machine?.ObtainPausedState(true))
++            {
++                var range = new Range(startAddress, size);
++                ValidateMemoryRangeAndThrow(range);
++                if(!mappedMemory.ContainsWholeRange(range))
++                {
++                    throw new RecoverableException(
++                        $"Tried to set ROMD access at {range} which isn't mapped memory in CPU: {this.GetName()}"
++                    );
++                }
++                TlibMapRangeRomd(startAddress, size);
++            }
++        }
++
+         // this is just for easier usage in Monitor
+@@ -2221,1 +2237,4 @@
++        [Import]
++        private readonly Action<ulong, ulong> TlibMapRangeRomd;
++
+         [Import]

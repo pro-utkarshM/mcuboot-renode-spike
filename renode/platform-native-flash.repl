@@ -1,6 +1,4 @@
-// nRF52840DK platform derived from Renode v1.16.1's
-// platforms/cpus/nrf52840.repl. The stock MappedMemory flash is replaced by
-// FaultInjectingFlash and the otherwise missing NVMC is modeled explicitly.
+// Experimental platform. The proof reference remains platform.repl.
 
 nvic: IRQControllers.NVIC @ sysbus 0xE000E000
     -> cpu@0
@@ -34,15 +32,15 @@ wdt: Timers.NRF52840_Watchdog @ sysbus 0x40010000
 
 ppi: Miscellaneous.NRF52840_PPI @ sysbus 0x4001F000
 
-ram: Memory.PowerLossRam @ { sysbus 0x800000; sysbus 0x20000000 }
+ram: Memory.NativePowerLossRam @ { sysbus 0x800000; sysbus 0x20000000 }
     size: 0x40000
 
-flash: Memory.FaultInjectingFlash @ sysbus 0x0
+flash: Memory.NativeFaultInjectingFlash @ sysbus 0x0
     ram: ram
     size: 0x100000
     pageSize: 0x1000
 
-nvmc: MTD.FaultInjectingNRF52840NVMC @ sysbus 0x4001E000
+nvmc: MTD.NativeFaultInjectingNRF52840NVMC @ sysbus 0x4001E000
     flash: flash
 
 clock: Miscellaneous.NRF_CLOCK @ sysbus 0x40000000
@@ -121,8 +119,6 @@ egu5: Miscellaneous.NRF52840_EGU @ sysbus 0x40019000
 
 sysbus:
     init:
-        // Do not ApplySVD from a URL: the final proof must run offline. These
-        // tags are the only FICR values needed by the pinned firmware.
         Tag <0x10000000, 0x10000FFF> "FICR"
         Tag <0x10000010, 0x10000013> "CODEPAGESIZE" 0x1000
         Tag <0x10000014, 0x10000017> "CODESIZE" 0x100
