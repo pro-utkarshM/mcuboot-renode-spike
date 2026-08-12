@@ -7,6 +7,7 @@ from pathlib import Path
 
 root = Path(os.environ.get("APP_ROOT", "/workspace/app"))
 artifacts = root / "artifacts"
+distributed_proof_id = os.environ.get("DISTRIBUTED_PROOF_ID")
 required = {
     "baseline": artifacts / "baseline" / "baseline-summary.json",
     "determinism": artifacts / "determinism-summary.json",
@@ -18,6 +19,8 @@ for name, path in required.items():
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("result") != "pass":
         raise SystemExit(f"{name} did not pass: {path}")
+    if distributed_proof_id and payload.get("proof_id") != distributed_proof_id:
+        raise SystemExit(f"{name} does not belong to distributed proof {distributed_proof_id}")
     results[name] = payload
 
 fixture_required = {
@@ -31,6 +34,9 @@ for name, path in fixture_required.items():
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("result") != "pass":
         raise SystemExit(f"{name} fixture verification did not pass: {path}")
+    if distributed_proof_id and payload.get("proof_id") != distributed_proof_id:
+        raise SystemExit(
+            f"{name} fixtures do not belong to distributed proof {distributed_proof_id}")
     fixture_results[name] = payload
 first_fixture = next(iter(fixture_results.values()))
 for name, payload in fixture_results.items():
@@ -50,6 +56,8 @@ hook = json.loads((artifacts / "baseline" / "fault-hook" /
                    "fault-hook-summary.json").read_text(encoding="utf-8"))
 if hook.get("result") != "pass":
     raise SystemExit("fault-hook proof did not pass")
+if distributed_proof_id and hook.get("proof_id") != distributed_proof_id:
+    raise SystemExit("fault-hook proof belongs to another distributed proof")
 results["fault_hook"] = hook
 summary = {
     "verdict": "PROVEN",
@@ -63,6 +71,8 @@ summary = {
     "fixture_verification": fixture_results,
     "gates": results,
 }
+if distributed_proof_id:
+    summary["proof_id"] = distributed_proof_id
 summary_path = artifacts / "proof-summary.json"
 temporary_path = artifacts / ".proof-summary.json.tmp"
 temporary_path.write_text(

@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 
 EXPECTED_ZEPHYR_REVISION = "684c9e8f32e4373a21098559f748f06915f950c9"
@@ -120,6 +121,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     result = verify(args.fixtures, args.expected_board)
+    if os.environ.get("DISTRIBUTED_PROOF_ID"):
+        result["proof_id"] = os.environ["DISTRIBUTED_PROOF_ID"]
     text = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

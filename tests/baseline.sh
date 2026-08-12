@@ -46,6 +46,7 @@ python3 "$app_root/tests/check_fault_snapshot.py" \
 python3 - "$output_root" <<'PY'
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -57,6 +58,8 @@ payload = {
     "baseline_flash_sha256": hashlib.sha256(
         (root / "initialization" / "final-flash.bin").read_bytes()).hexdigest(),
 }
+if os.environ.get("DISTRIBUTED_PROOF_ID"):
+    payload["proof_id"] = os.environ["DISTRIBUTED_PROOF_ID"]
 (root / "baseline-summary.json").write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY

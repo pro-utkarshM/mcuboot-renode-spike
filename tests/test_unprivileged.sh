@@ -44,6 +44,7 @@ grep -qx 'make' "$output/pid1-comm.txt"
 
 python3 - "$output" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 root = Path(sys.argv[1])
@@ -62,6 +63,8 @@ payload = {
     "host_network_namespace": False,
     "sealed_inputs_read_only": True,
 }
+if os.environ.get("DISTRIBUTED_PROOF_ID"):
+    payload["proof_id"] = os.environ["DISTRIBUTED_PROOF_ID"]
 (root / "unprivileged-summary.json").write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY

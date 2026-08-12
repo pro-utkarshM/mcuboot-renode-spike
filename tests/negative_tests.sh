@@ -37,6 +37,7 @@ run_negative erase-after-confirm v2-negative-erase-after-confirm-signed.bin
 
 python3 - "$artifacts" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 root = Path(sys.argv[1])
@@ -50,6 +51,8 @@ payload = {
          "bug": "required durable state deleted after image confirmation"},
     ],
 }
+if os.environ.get("DISTRIBUTED_PROOF_ID"):
+    payload["proof_id"] = os.environ["DISTRIBUTED_PROOF_ID"]
 (root / "negative-tests-summary.json").write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
